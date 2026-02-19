@@ -103,7 +103,10 @@ class TemplateDocumentationProvider : AbstractDocumentationProvider() {
         filePath: String
     ): String {
         val sb = StringBuilder()
-        sb.append("<html><body>")
+        sb.append("<html><head><style>")
+        sb.append("body { min-width: 500px; }")
+        sb.append("li { white-space: nowrap; }")
+        sb.append("</style></head><body>")
 
         // Header
         sb.append("<b>Template:</b> <code>${templateRef.trim()}</code><br/><br/>")
@@ -143,7 +146,7 @@ class TemplateDocumentationProvider : AbstractDocumentationProvider() {
         groups: List<VariableGroup>
     ): String {
         val sb = StringBuilder()
-        sb.append("<html><body>")
+        sb.append("<html><head><style>body { min-width: 500px; }</style></head><body>")
 
         val systemPrefixes = listOf("Build.", "System.", "Agent.", "Pipeline.", "Environment.", "Release.", "Deployment.", "Strategy.")
         val isSystem = systemPrefixes.any { varName.startsWith(it) }
@@ -175,7 +178,7 @@ class TemplateDocumentationProvider : AbstractDocumentationProvider() {
 
     private fun buildUnknownAliasHtml(alias: String): String {
         return """
-            <html><body>
+            <html><head><style>body { min-width: 500px; }</style></head><body>
             <b>Repository alias not found:</b> <code>@$alias</code><br/><br/>
             <i>Add a <code>resources.repositories</code> entry with <code>repository: $alias</code>
             to enable cross-repo template resolution.</i>
@@ -185,7 +188,7 @@ class TemplateDocumentationProvider : AbstractDocumentationProvider() {
 
     private fun buildFileNotFoundHtml(filePath: String, repoName: String?): String {
         val sb = StringBuilder()
-        sb.append("<html><body>")
+        sb.append("<html><head><style>body { min-width: 500px; }</style></head><body>")
         sb.append("<b>Template not found:</b><br/><br/><code>$filePath</code>")
         if (repoName != null) {
             sb.append("<br/><br/><i>Make sure the <code>$repoName</code> repository is cloned next to this workspace.</i>")
