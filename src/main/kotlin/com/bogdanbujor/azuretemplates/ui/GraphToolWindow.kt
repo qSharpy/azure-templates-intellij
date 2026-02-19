@@ -3,6 +3,7 @@ package com.bogdanbujor.azuretemplates.ui
 import com.bogdanbujor.azuretemplates.core.GraphBuilder
 import com.bogdanbujor.azuretemplates.core.GraphData
 import com.bogdanbujor.azuretemplates.settings.PluginSettings
+import com.intellij.openapi.application.ApplicationManager
 import com.intellij.openapi.fileEditor.FileEditorManager
 import com.intellij.openapi.fileEditor.FileEditorManagerListener
 import com.intellij.openapi.fileEditor.OpenFileDescriptor
@@ -95,7 +96,6 @@ class GraphPanel(private val project: Project) {
                     svg { position: absolute; top: 0; left: 0; width: 100%; height: 100%; }
                     .node circle { stroke: #fff; stroke-width: 1.5px; cursor: pointer; }
                     .node text { font-size: 10px; fill: #ccc; pointer-events: none; }
-                    .link { stroke: #555; stroke-opacity: 0.6; stroke-width: 1px; }
                     .link-label { font-size: 8px; fill: #888; }
                     #controls { position: absolute; top: 10px; right: 10px; z-index: 10; display: flex; gap: 4px; }
                     #controls button { padding: 4px 8px; background: #333; color: #ccc; border: 1px solid #555; cursor: pointer; border-radius: 3px; font-size: 12px; }
@@ -108,6 +108,16 @@ class GraphPanel(private val project: Project) {
                     .node.missing circle { fill: #f44336; }
                     .node.unknown circle { fill: #9E9E9E; }
                     .node.scope circle { stroke: #FFD700; stroke-width: 3px; }
+                    #legend { position: absolute; bottom: 10px; left: 10px; z-index: 10; }
+                    #legend-toggle { padding: 4px 10px; background: #333; color: #ccc; border: 1px solid #555; cursor: pointer; border-radius: 4px; font-size: 12px; display: flex; align-items: center; gap: 4px; }
+                    #legend-toggle:hover { background: #444; }
+                    #legend-toggle .arrow { font-size: 9px; transition: transform 0.2s; }
+                    #legend-toggle.open .arrow { transform: rotate(90deg); }
+                    #legend-content { display: none; background: rgba(30,30,30,0.95); border: 1px solid #555; border-radius: 4px; padding: 8px 12px; margin-top: 4px; font-size: 11px; }
+                    #legend-content.open { display: block; }
+                    #legend-content div { margin: 2px 0; display: flex; align-items: center; gap: 6px; }
+                    #legend .swatch { width: 10px; height: 10px; border-radius: 50%; display: inline-block; }
+                    #legend .line-swatch { width: 20px; height: 0; display: inline-block; border-top: 2px solid; }
                 </style>
             </head>
             <body>
@@ -119,7 +129,35 @@ class GraphPanel(private val project: Project) {
                     <button onclick="resetGraph()">Reset</button>
                     <button onclick="toggleScope()">Toggle Scope</button>
                 </div>
-                <svg id="graph"></svg>
+                <div id="legend">
+                    <button id="legend-toggle" onclick="document.getElementById('legend-toggle').classList.toggle('open'); document.getElementById('legend-content').classList.toggle('open');">
+                        <span class="arrow">▶</span> Legend
+                    </button>
+                    <div id="legend-content">
+                        <div><span class="swatch" style="background:#4CAF50"></span> Pipeline root</div>
+                        <div><span class="swatch" style="background:#2196F3"></span> Local template</div>
+                        <div><span class="swatch" style="background:#FF9800"></span> External template</div>
+                        <div><span class="swatch" style="background:#f44336"></span> Missing file</div>
+                        <div style="margin-top:4px"><span class="line-swatch" style="border-color:#4e9de0"></span> Calls (downstream) →</div>
+                        <div><span class="line-swatch" style="border-color:#e09a3d; border-top-style:dashed"></span> Called by (upstream) ←</div>
+                    </div>
+                </div>
+                <svg id="graph">
+                    <defs>
+                        <marker id="arrow" viewBox="0 0 10 6" refX="18" refY="3"
+                                markerWidth="8" markerHeight="6" orient="auto-start-reverse">
+                            <path d="M0,0 L10,3 L0,6 Z" fill="#4e9de0"/>
+                        </marker>
+                        <marker id="arrow-upstream" viewBox="0 0 10 6" refX="18" refY="3"
+                                markerWidth="8" markerHeight="6" orient="auto-start-reverse">
+                            <path d="M0,0 L10,3 L0,6 Z" fill="#e09a3d"/>
+                        </marker>
+                        <marker id="arrow-default" viewBox="0 0 10 6" refX="18" refY="3"
+                                markerWidth="8" markerHeight="6" orient="auto-start-reverse">
+                            <path d="M0,0 L10,3 L0,6 Z" fill="#888"/>
+                        </marker>
+                    </defs>
+                </svg>
                 <script>$d3Js</script>
                 <script>
                     // Bridge to IntelliJ
@@ -136,6 +174,21 @@ class GraphPanel(private val project: Project) {
                     let svg, g, link, node, linkLabel;
                     let zoom;
                     let fileScopeMode = false;
+                    
+                    // Track drag distance to distinguish click from drag
+                    let dragStartX = 0, dragStartY = 0, dragMoved = false;
+                    
+                    function edgeColor(e) {
+                        if (e.direction === 'upstream')   return '#e09a3d';
+                        if (e.direction === 'downstream') return '#4e9de0';
+                        return '#888';
+                    }
+                    
+                    function edgeMarker(e) {
+                        if (e.direction === 'upstream')   return 'url(#arrow-upstream)';
+                        if (e.direction === 'downstream') return 'url(#arrow)';
+                        return 'url(#arrow-default)';
+                    }
                     
                     function initGraph() {
                         svg = d3.select('#graph');
@@ -179,7 +232,7 @@ class GraphPanel(private val project: Project) {
                         node = g.append('g').attr('class', 'nodes').selectAll('g');
                         
                         simulation = d3.forceSimulation()
-                            .force('link', d3.forceLink().id(d => d.id).distance(100))
+                            .force('link', d3.forceLink().id(d => d.id).distance(120))
                             .force('charge', d3.forceManyBody().strength(-300))
                             .force('center', d3.forceCenter(width / 2, height / 2))
                             .force('collision', d3.forceCollide().radius(30));
@@ -204,16 +257,22 @@ class GraphPanel(private val project: Project) {
                         const nodes = data.nodes || [];
                         const edges = (data.edges || []).map(e => ({ ...e, source: e.source, target: e.target }));
                         
-                        // Update links
+                        // Update links with directional styling
                         link = link.data(edges, d => d.source + '-' + d.target);
                         link.exit().remove();
-                        link = link.enter().append('line').attr('class', 'link')
-                            .merge(link);
+                        const linkEnter = link.enter().append('line')
+                            .attr('stroke', d => edgeColor(d))
+                            .attr('stroke-opacity', d => (d.direction === 'upstream' || d.direction === 'downstream') ? 0.8 : 0.6)
+                            .attr('stroke-width', d => (d.direction === 'upstream' || d.direction === 'downstream') ? 2 : 1.5)
+                            .attr('stroke-dasharray', d => d.direction === 'upstream' ? '5,3' : null)
+                            .attr('marker-end', d => edgeMarker(d));
+                        link = linkEnter.merge(link);
                         
                         // Update link labels
                         linkLabel = linkLabel.data(edges.filter(e => e.label), d => d.source + '-' + d.target);
                         linkLabel.exit().remove();
                         linkLabel = linkLabel.enter().append('text').attr('class', 'link-label')
+                            .attr('fill', d => edgeColor(d))
                             .text(d => d.label)
                             .merge(linkLabel);
                         
@@ -235,12 +294,6 @@ class GraphPanel(private val project: Project) {
                             .attr('dy', '.35em')
                             .text(d => d.label + (d.paramCount > 0 ? ' (' + d.paramCount + ')' : ''));
                         
-                        nodeEnter.on('click', (event, d) => {
-                            if (d.filePath) {
-                                bridge.postMessage({ type: 'openFile', filePath: d.filePath });
-                            }
-                        });
-                        
                         nodeEnter.append('title').text(d => d.relativePath || d.label);
                         
                         node = nodeEnter.merge(node);
@@ -261,11 +314,20 @@ class GraphPanel(private val project: Project) {
                     function dragstarted(event, d) {
                         if (!event.active) simulation.alphaTarget(0.3).restart();
                         d.fx = d.x; d.fy = d.y;
+                        dragStartX = event.x; dragStartY = event.y; dragMoved = false;
                     }
-                    function dragged(event, d) { d.fx = event.x; d.fy = event.y; }
+                    function dragged(event, d) {
+                        d.fx = event.x; d.fy = event.y;
+                        const dx = event.x - dragStartX, dy = event.y - dragStartY;
+                        if (dx * dx + dy * dy > 9) dragMoved = true;
+                    }
                     function dragended(event, d) {
                         if (!event.active) simulation.alphaTarget(0);
                         d.fx = null; d.fy = null;
+                        // If the mouse barely moved, treat it as a click
+                        if (!dragMoved && d.filePath) {
+                            bridge.postMessage({ type: 'openFile', filePath: d.filePath });
+                        }
                     }
                     
                     function zoomIn() {
@@ -350,9 +412,12 @@ class GraphPanel(private val project: Project) {
             when (type) {
                 "openFile" -> {
                     val filePath = json["filePath"]?.jsonPrimitive?.content ?: return
-                    val virtualFile = LocalFileSystem.getInstance().findFileByPath(filePath) ?: return
-                    val descriptor = OpenFileDescriptor(project, virtualFile, 0, 0)
-                    FileEditorManager.getInstance(project).openTextEditor(descriptor, true)
+                    // Must run on EDT since we're called from a CEF callback thread
+                    ApplicationManager.getApplication().invokeLater {
+                        val virtualFile = LocalFileSystem.getInstance().findFileByPath(filePath) ?: return@invokeLater
+                        val descriptor = OpenFileDescriptor(project, virtualFile, 0, 0)
+                        FileEditorManager.getInstance(project).openTextEditor(descriptor, true)
+                    }
                 }
                 "toggleScope" -> {
                     fileScope = json["fileScope"]?.jsonPrimitive?.boolean ?: false

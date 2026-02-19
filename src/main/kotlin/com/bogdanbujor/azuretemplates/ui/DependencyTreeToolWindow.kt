@@ -12,6 +12,8 @@ import com.intellij.openapi.vfs.LocalFileSystem
 import com.intellij.openapi.vfs.VirtualFile
 import com.intellij.openapi.wm.ToolWindow
 import com.intellij.openapi.wm.ToolWindowFactory
+import com.intellij.ui.ColoredTreeCellRenderer
+import com.intellij.ui.SimpleTextAttributes
 import com.intellij.ui.components.JBScrollPane
 import com.intellij.ui.content.ContentFactory
 import com.intellij.ui.treeStructure.Tree
@@ -19,6 +21,7 @@ import java.awt.event.MouseAdapter
 import java.awt.event.MouseEvent
 import java.io.File
 import javax.swing.Icon
+import javax.swing.JTree
 import javax.swing.tree.DefaultMutableTreeNode
 import javax.swing.tree.DefaultTreeModel
 
@@ -40,7 +43,8 @@ data class TreeNodeData(
     val label: String,
     val filePath: String? = null,
     val icon: Icon = AllIcons.FileTypes.Yaml,
-    val isGroup: Boolean = false
+    val isGroup: Boolean = false,
+    val description: String? = null
 )
 
 class DependencyTreePanel(private val project: Project) {
@@ -51,7 +55,7 @@ class DependencyTreePanel(private val project: Project) {
     val component: JBScrollPane
 
     init {
-        tree.isRootVisible = true
+        tree.isRootVisible = false
         tree.cellRenderer = TemplateTreeCellRenderer()
 
         // Double-click to open file
@@ -94,11 +98,6 @@ class DependencyTreePanel(private val project: Project) {
         val basePath = project.basePath ?: return
 
         root.removeAllChildren()
-        root.userObject = TreeNodeData(
-            label = targetFile.name,
-            filePath = filePath,
-            icon = AllIcons.FileTypes.Yaml
-        )
 
         // Ensure index is built
         val indexService = TemplateIndexService.getInstance(project)
@@ -106,11 +105,12 @@ class DependencyTreePanel(private val project: Project) {
             indexService.fullIndex()
         }
 
-        // Upstream callers
+        // Upstream callers — added as a top-level node ABOVE the file node
         val callers = indexService.getUpstreamCallers(filePath)
         if (callers.isNotEmpty()) {
+            val callerCountText = if (callers.size == 1) "1 caller" else "${callers.size} callers"
             val callersNode = DefaultMutableTreeNode(
-                TreeNodeData("Called by (${callers.size})", isGroup = true, icon = AllIcons.General.ArrowUp)
+                TreeNodeData("Called by", isGroup = true, icon = AllIcons.General.ArrowDown, description = callerCountText)
             )
             for (callerPath in callers) {
                 callersNode.add(DefaultMutableTreeNode(
@@ -124,19 +124,26 @@ class DependencyTreePanel(private val project: Project) {
             root.add(callersNode)
         }
 
+        // File node with downstream dependencies as children
+        val fileNode = DefaultMutableTreeNode(
+            TreeNodeData(
+                label = targetFile.name,
+                filePath = filePath,
+                icon = AllIcons.FileTypes.Yaml
+            )
+        )
+
         // Downstream dependencies
         val text = try { File(filePath).readText() } catch (e: Exception) { return }
         val repoAliases = RepositoryAliasParser.parse(text)
         val refs = GraphBuilder.extractTemplateRefs(filePath)
 
         if (refs.isNotEmpty()) {
-            val depsNode = DefaultMutableTreeNode(
-                TreeNodeData("References (${refs.size})", isGroup = true, icon = AllIcons.General.ArrowDown)
-            )
             val visited = mutableSetOf<String>()
-            addDownstreamNodes(depsNode, refs, filePath, repoAliases, basePath, visited)
-            root.add(depsNode)
+            addDownstreamNodes(fileNode, refs, filePath, repoAliases, basePath, visited)
         }
+
+        root.add(fileNode)
 
         treeModel.reload()
         // Expand all nodes
@@ -227,21 +234,22 @@ class DependencyTreePanel(private val project: Project) {
 /**
  * Custom tree cell renderer for the dependency tree.
  */
-class TemplateTreeCellRenderer : javax.swing.tree.DefaultTreeCellRenderer() {
-    override fun getTreeCellRendererComponent(
-        tree: javax.swing.JTree?,
+class TemplateTreeCellRenderer : ColoredTreeCellRenderer() {
+    override fun customizeCellRenderer(
+        tree: JTree,
         value: Any?,
-        sel: Boolean,
+        selected: Boolean,
         expanded: Boolean,
         leaf: Boolean,
         row: Int,
         hasFocus: Boolean
-    ): java.awt.Component {
-        super.getTreeCellRendererComponent(tree, value, sel, expanded, leaf, row, hasFocus)
-        val node = value as? DefaultMutableTreeNode ?: return this
-        val data = node.userObject as? TreeNodeData ?: return this
-        text = data.label
+    ) {
+        val node = value as? DefaultMutableTreeNode ?: return
+        val data = node.userObject as? TreeNodeData ?: return
         icon = data.icon
-        return this
+        append(data.label, SimpleTextAttributes.REGULAR_ATTRIBUTES)
+        if (data.description != null) {
+            append("  ${data.description}", SimpleTextAttributes.GRAYED_ATTRIBUTES)
+        }
     }
 }
