@@ -1,0 +1,177 @@
+package com.bogdanbujor.azuretemplates.ui
+
+import com.bogdanbujor.azuretemplates.core.*
+import com.intellij.icons.AllIcons
+import com.intellij.openapi.fileEditor.FileEditorManager
+import com.intellij.openapi.fileEditor.OpenFileDescriptor
+import com.intellij.openapi.project.DumbAware
+import com.intellij.openapi.project.Project
+import com.intellij.openapi.vfs.LocalFileSystem
+import com.intellij.openapi.wm.ToolWindow
+import com.intellij.openapi.wm.ToolWindowFactory
+import com.intellij.ui.components.JBScrollPane
+import com.intellij.ui.content.ContentFactory
+import com.intellij.ui.treeStructure.Tree
+import java.awt.event.MouseAdapter
+import java.awt.event.MouseEvent
+import java.io.File
+import javax.swing.tree.DefaultMutableTreeNode
+import javax.swing.tree.DefaultTreeModel
+
+/**
+ * Tool window showing all template diagnostics grouped by file.
+ *
+ * Port of diagnosticsPanelProvider.js from the VS Code extension.
+ */
+class DiagnosticsToolWindow : ToolWindowFactory, DumbAware {
+
+    override fun createToolWindowContent(project: Project, toolWindow: ToolWindow) {
+        val panel = DiagnosticsPanel(project)
+        val content = ContentFactory.getInstance().createContent(panel.component, "", false)
+        toolWindow.contentManager.addContent(content)
+    }
+}
+
+data class DiagnosticNodeData(
+    val label: String,
+    val filePath: String? = null,
+    val line: Int = -1,
+    val column: Int = 0,
+    val icon: javax.swing.Icon = AllIcons.General.Information,
+    val isFile: Boolean = false
+)
+
+class DiagnosticsPanel(private val project: Project) {
+
+    private val root = DefaultMutableTreeNode(DiagnosticNodeData("Diagnostics", icon = AllIcons.General.InspectionsEye))
+    private val treeModel = DefaultTreeModel(root)
+    private val tree = Tree(treeModel)
+    val component: JBScrollPane
+
+    init {
+        tree.isRootVisible = false
+        tree.cellRenderer = DiagnosticTreeCellRenderer()
+
+        // Double-click to navigate
+        tree.addMouseListener(object : MouseAdapter() {
+            override fun mouseClicked(e: MouseEvent) {
+                if (e.clickCount == 2) {
+                    val node = tree.lastSelectedPathComponent as? DefaultMutableTreeNode ?: return
+                    val data = node.userObject as? DiagnosticNodeData ?: return
+                    val filePath = data.filePath ?: return
+                    navigateTo(filePath, data.line, data.column)
+                }
+            }
+        })
+
+        component = JBScrollPane(tree)
+    }
+
+    fun refresh() {
+        val basePath = project.basePath ?: return
+        val yamlFiles = GraphBuilder.collectYamlFiles(File(basePath))
+
+        root.removeAllChildren()
+
+        var totalErrors = 0
+        var totalWarnings = 0
+
+        for (filePath in yamlFiles) {
+            val text = try { File(filePath).readText() } catch (e: Exception) { continue }
+            val lines = text.replace("\r\n", "\n").split("\n")
+            val repoAliases = RepositoryAliasParser.parse(text)
+
+            val fileIssues = mutableListOf<DiagnosticIssue>()
+
+            for (i in lines.indices) {
+                val line = lines[i]
+                val stripped = line.replace(Regex("(^\\s*#.*|\\s#.*)$"), "")
+                val match = Regex("(?:^|\\s)-?\\s*template\\s*:\\s*(.+)$").find(stripped) ?: continue
+
+                val templateRef = match.groupValues[1].trim()
+                if (templateRef.contains("\${") || templateRef.contains("\$(")) continue
+
+                val issues = CallSiteValidator.validate(lines, i, templateRef, filePath, repoAliases)
+                fileIssues.addAll(issues)
+            }
+
+            if (fileIssues.isNotEmpty()) {
+                val errors = fileIssues.count { it.severity == IssueSeverity.ERROR }
+                val warnings = fileIssues.count { it.severity == IssueSeverity.WARNING }
+                totalErrors += errors
+                totalWarnings += warnings
+
+                val relativePath = try {
+                    File(filePath).relativeTo(File(basePath)).path
+                } catch (e: Exception) {
+                    File(filePath).name
+                }
+
+                val fileIcon = if (errors > 0) AllIcons.General.Error else AllIcons.General.Warning
+                val fileLabel = "$relativePath ($errors errors, $warnings warnings)"
+
+                val fileNode = DefaultMutableTreeNode(
+                    DiagnosticNodeData(
+                        label = fileLabel,
+                        filePath = filePath,
+                        icon = fileIcon,
+                        isFile = true
+                    )
+                )
+
+                for (issue in fileIssues) {
+                    val issueIcon = when (issue.severity) {
+                        IssueSeverity.ERROR -> AllIcons.General.Error
+                        IssueSeverity.WARNING -> AllIcons.General.Warning
+                    }
+                    val issueLabel = "Line ${issue.line + 1}: ${issue.message}"
+
+                    fileNode.add(DefaultMutableTreeNode(
+                        DiagnosticNodeData(
+                            label = issueLabel,
+                            filePath = filePath,
+                            line = issue.line,
+                            column = issue.startColumn,
+                            icon = issueIcon
+                        )
+                    ))
+                }
+
+                root.add(fileNode)
+            }
+        }
+
+        treeModel.reload()
+
+        // Expand all file nodes
+        for (i in 0 until tree.rowCount) {
+            tree.expandRow(i)
+        }
+    }
+
+    private fun navigateTo(filePath: String, line: Int, column: Int) {
+        val virtualFile = LocalFileSystem.getInstance().findFileByPath(filePath) ?: return
+        val targetLine = if (line >= 0) line else 0
+        val descriptor = OpenFileDescriptor(project, virtualFile, targetLine, column)
+        FileEditorManager.getInstance(project).openTextEditor(descriptor, true)
+    }
+}
+
+class DiagnosticTreeCellRenderer : javax.swing.tree.DefaultTreeCellRenderer() {
+    override fun getTreeCellRendererComponent(
+        tree: javax.swing.JTree?,
+        value: Any?,
+        sel: Boolean,
+        expanded: Boolean,
+        leaf: Boolean,
+        row: Int,
+        hasFocus: Boolean
+    ): java.awt.Component {
+        super.getTreeCellRendererComponent(tree, value, sel, expanded, leaf, row, hasFocus)
+        val node = value as? DefaultMutableTreeNode ?: return this
+        val data = node.userObject as? DiagnosticNodeData ?: return this
+        text = data.label
+        icon = data.icon
+        return this
+    }
+}

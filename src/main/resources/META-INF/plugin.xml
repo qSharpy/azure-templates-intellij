@@ -1,0 +1,86 @@
+<idea-plugin>
+    <id>com.bogdanbujor.azure-templates-navigator</id>
+    <name>Azure Templates Navigator</name>
+    <vendor email="bogdan@bogdanbujor.com" url="https://github.com/qSharpy">bogdanbujor</vendor>
+    <description><![CDATA[
+        Hover over Azure Pipeline template references to see parameters.
+        Click to navigate. Validates parameters, provides autocomplete,
+        variable hover, dependency tree, and interactive template graph.
+    ]]></description>
+
+    <depends>com.intellij.modules.platform</depends>
+    <depends>org.jetbrains.plugins.yaml</depends>
+
+    <extensions defaultExtensionNs="com.intellij">
+        <!-- Documentation (hover) -->
+        <lang.documentationProvider language="yaml"
+            implementationClass="com.bogdanbujor.azuretemplates.providers.TemplateDocumentationProvider"/>
+
+        <!-- Go-to-declaration -->
+        <gotoDeclarationHandler
+            implementation="com.bogdanbujor.azuretemplates.providers.TemplateGotoDeclarationHandler"/>
+
+        <!-- Completion -->
+        <completion.contributor language="yaml"
+            implementationClass="com.bogdanbujor.azuretemplates.providers.TemplateCompletionContributor"/>
+
+        <!-- Inspection (diagnostics) -->
+        <localInspection language="yaml"
+            groupName="Azure Templates Navigator"
+            displayName="Template parameter validation"
+            enabledByDefault="true"
+            level="ERROR"
+            implementationClass="com.bogdanbujor.azuretemplates.providers.TemplateInspection"/>
+
+        <!-- Line markers (gutter icons) -->
+        <codeInsight.lineMarkerProvider language="yaml"
+            implementationClass="com.bogdanbujor.azuretemplates.providers.TemplateLineMarkerProvider"/>
+
+        <!-- Tool windows -->
+        <toolWindow id="Azure Templates - Dependencies"
+            anchor="right"
+            factoryClass="com.bogdanbujor.azuretemplates.ui.DependencyTreeToolWindow"
+            icon="AllIcons.Nodes.TreeOpen"/>
+
+        <toolWindow id="Azure Templates - Graph"
+            anchor="right"
+            factoryClass="com.bogdanbujor.azuretemplates.ui.GraphToolWindow"
+            icon="AllIcons.Nodes.DataTables"/>
+
+        <toolWindow id="Azure Templates - Diagnostics"
+            anchor="bottom"
+            factoryClass="com.bogdanbujor.azuretemplates.ui.DiagnosticsToolWindow"
+            icon="AllIcons.General.InspectionsEye"/>
+
+        <!-- Settings -->
+        <applicationConfigurable
+            parentId="tools"
+            instance="com.bogdanbujor.azuretemplates.settings.PluginSettingsConfigurable"
+            id="com.bogdanbujor.azuretemplates.settings"
+            displayName="Azure Templates Navigator"/>
+
+        <applicationService
+            serviceImplementation="com.bogdanbujor.azuretemplates.settings.PluginSettings"/>
+
+        <!-- Project service -->
+        <projectService
+            serviceImplementation="com.bogdanbujor.azuretemplates.services.TemplateIndexService"/>
+    </extensions>
+
+    <actions>
+        <group id="AzureTemplatesNavigator.ToolbarActions" text="Azure Templates Navigator">
+            <action id="AzureTemplatesNavigator.RefreshTree"
+                class="com.bogdanbujor.azuretemplates.actions.RefreshTreeAction"
+                text="Refresh Template Tree"
+                icon="AllIcons.Actions.Refresh"/>
+            <action id="AzureTemplatesNavigator.RefreshGraph"
+                class="com.bogdanbujor.azuretemplates.actions.RefreshGraphAction"
+                text="Refresh Template Graph"
+                icon="AllIcons.Actions.Refresh"/>
+            <action id="AzureTemplatesNavigator.RefreshDiagnostics"
+                class="com.bogdanbujor.azuretemplates.actions.RefreshDiagnosticsAction"
+                text="Refresh Diagnostics"
+                icon="AllIcons.Actions.Refresh"/>
+        </group>
+    </actions>
+</idea-plugin>
