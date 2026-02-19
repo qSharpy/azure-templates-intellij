@@ -81,6 +81,4 @@ jobs:
       - ${{ if ne(parameters.notifyWebhookUrl, '') }}:
         - template: /samples/templates/notify-teams.yml
           parameters:
-            webhookUrl: ${{ parameters.notifyWebhookUrl }}
             message: ${{ parameters.notifyMessage }}
-            title: '${{ parameters.jobName }} — Build Status'

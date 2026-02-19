@@ -60,8 +60,8 @@ data class GraphNode(
     val filePath: String? = null,
     val repoName: String? = null,
     val alias: String? = null,
-    var paramCount: Int = 0,
-    var requiredCount: Int = 0,
+    val paramCount: Int = 0,
+    val requiredCount: Int = 0,
     val isScope: Boolean = false
 )
 

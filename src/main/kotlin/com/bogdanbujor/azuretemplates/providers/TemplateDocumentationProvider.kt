@@ -3,10 +3,11 @@ package com.bogdanbujor.azuretemplates.providers
 import com.bogdanbujor.azuretemplates.core.*
 import com.bogdanbujor.azuretemplates.settings.PluginSettings
 import com.intellij.lang.documentation.AbstractDocumentationProvider
+import com.intellij.openapi.application.ReadAction
 import com.intellij.openapi.editor.Editor
+import com.intellij.openapi.vfs.LocalFileSystem
 import com.intellij.psi.PsiElement
 import com.intellij.psi.PsiFile
-import java.io.File
 
 /**
  * Documentation provider for YAML files that shows hover tooltips for:
@@ -81,12 +82,16 @@ class TemplateDocumentationProvider : AbstractDocumentationProvider() {
 
         val filePath = resolved.filePath ?: return null
 
-        // Read the template file
-        val text = try {
-            File(filePath).readText()
-        } catch (e: Exception) {
-            return buildFileNotFoundHtml(filePath, resolved.repoName)
-        }
+        // Read the template file via VFS inside a ReadAction to avoid blocking the EDT
+        val text = ReadAction.compute<String?, Throwable> {
+            val vf = LocalFileSystem.getInstance().findFileByPath(filePath)
+                ?: return@compute null
+            try {
+                String(vf.contentsToByteArray(), vf.charset)
+            } catch (e: Exception) {
+                null
+            }
+        } ?: return buildFileNotFoundHtml(filePath, resolved.repoName)
 
         val settings = PluginSettings.getInstance()
         val requiredColor = settings.requiredParameterColor

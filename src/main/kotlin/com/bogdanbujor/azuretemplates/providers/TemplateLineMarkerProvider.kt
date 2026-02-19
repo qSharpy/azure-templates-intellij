@@ -10,7 +10,6 @@ import com.intellij.openapi.fileEditor.FileEditorManager
 import com.intellij.openapi.fileEditor.OpenFileDescriptor
 import com.intellij.openapi.vfs.LocalFileSystem
 import com.intellij.psi.PsiElement
-import java.io.File
 
 /**
  * Line marker provider that shows gutter icons on "- template:" lines
@@ -42,7 +41,10 @@ class TemplateLineMarkerProvider : LineMarkerProvider {
         val resolved = TemplateResolver.resolve(templateRef, currentFilePath, repoAliases) ?: return null
 
         if (resolved.unknownAlias || resolved.filePath == null) return null
-        if (!File(resolved.filePath).exists()) return null
+        // Use VFS to check existence — avoids blocking disk I/O on the EDT
+        val targetVirtualFile = LocalFileSystem.getInstance().findFileByPath(resolved.filePath)
+            ?: return null
+        if (!targetVirtualFile.isValid) return null
 
         val icon = if (resolved.repoName != null) AllIcons.Nodes.PpLib else AllIcons.FileTypes.Yaml
         val tooltip = if (resolved.repoName != null) {
@@ -58,8 +60,7 @@ class TemplateLineMarkerProvider : LineMarkerProvider {
             { tooltip },
             { _, elt ->
                 val project = elt.project
-                val virtualFile = LocalFileSystem.getInstance().findFileByPath(resolved.filePath) ?: return@LineMarkerInfo
-                val descriptor = OpenFileDescriptor(project, virtualFile, 0, 0)
+                val descriptor = OpenFileDescriptor(project, targetVirtualFile, 0, 0)
                 FileEditorManager.getInstance(project).openTextEditor(descriptor, true)
             },
             GutterIconRenderer.Alignment.LEFT,

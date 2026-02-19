@@ -18,6 +18,11 @@ import com.intellij.psi.PsiFile
  */
 class TemplateInspection : LocalInspectionTool() {
 
+    companion object {
+        private val COMMENT_STRIP_REGEX = Regex("(^\\s*#.*|\\s#.*)$")
+        private val TEMPLATE_REF_REGEX = Regex("(?:^|\\s)-?\\s*template\\s*:\\s*(.+)$")
+    }
+
     override fun buildVisitor(holder: ProblemsHolder, isOnTheFly: Boolean): PsiElementVisitor {
         return object : PsiElementVisitor() {
             override fun visitFile(file: PsiFile) {
@@ -36,8 +41,8 @@ class TemplateInspection : LocalInspectionTool() {
                 for (i in lines.indices) {
                     val line = lines[i]
                     // Strip YAML line comments before matching
-                    val stripped = line.replace(Regex("(^\\s*#.*|\\s#.*)$"), "")
-                    val match = Regex("(?:^|\\s)-?\\s*template\\s*:\\s*(.+)$").find(stripped) ?: continue
+                    val stripped = line.replace(COMMENT_STRIP_REGEX, "")
+                    val match = TEMPLATE_REF_REGEX.find(stripped) ?: continue
 
                     val templateRef = match.groupValues[1].trim()
                     // Skip template expressions with variables

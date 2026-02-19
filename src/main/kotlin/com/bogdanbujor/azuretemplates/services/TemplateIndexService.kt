@@ -1,7 +1,10 @@
 package com.bogdanbujor.azuretemplates.services
 
 import com.bogdanbujor.azuretemplates.core.*
+import com.intellij.openapi.application.ApplicationManager
 import com.intellij.openapi.components.Service
+import com.intellij.openapi.progress.ProgressIndicator
+import com.intellij.openapi.progress.Task
 import com.intellij.openapi.project.Project
 import com.intellij.openapi.vfs.VirtualFileManager
 import com.intellij.openapi.vfs.newvfs.BulkFileListener
@@ -14,6 +17,9 @@ import java.io.File
  *
  * Provides fast lookups for upstream callers, downstream dependencies,
  * and feeds data to the tree view, graph, and diagnostics panel.
+ *
+ * Call [addIndexListener] to be notified whenever the index is updated
+ * (e.g. after a YAML file is saved). Listeners are invoked on the EDT.
  */
 @Service(Service.Level.PROJECT)
 class TemplateIndexService(private val project: Project) {
@@ -29,8 +35,11 @@ class TemplateIndexService(private val project: Project) {
     private val index = mutableMapOf<String, FileIndex>()
     private val upstreamCache = mutableMapOf<String, List<String>>()
 
+    /** Listeners notified on the EDT after every index update. */
+    private val indexListeners = mutableListOf<() -> Unit>()
+
     init {
-        // Listen for file changes
+        // Listen for file changes and re-index affected YAML files.
         project.messageBus.connect().subscribe(
             VirtualFileManager.VFS_CHANGES,
             object : BulkFileListener {
@@ -44,6 +53,8 @@ class TemplateIndexService(private val project: Project) {
                             reindexFile(event.path)
                         }
                         rebuildUpstreamCache()
+                        // Notify UI components (e.g. DiagnosticsPanel) that the index changed.
+                        notifyIndexUpdated()
                     }
                 }
             }
@@ -51,7 +62,42 @@ class TemplateIndexService(private val project: Project) {
     }
 
     /**
-     * Performs a full index of all YAML files in the project.
+     * Registers a listener that will be called on the EDT after every index update.
+     * Typically called by UI components during their initialization.
+     */
+    fun addIndexListener(listener: () -> Unit) {
+        indexListeners.add(listener)
+    }
+
+    /**
+     * Performs a full index of all YAML files in the project on a background thread.
+     * [onComplete] is invoked on the EDT after indexing finishes (optional).
+     */
+    fun fullIndexAsync(onComplete: (() -> Unit)? = null) {
+        object : Task.Backgroundable(project, "Indexing Azure Pipeline templates…", false) {
+            override fun run(indicator: ProgressIndicator) {
+                val basePath = project.basePath ?: return
+                val yamlFiles = GraphBuilder.collectYamlFiles(File(basePath))
+
+                indicator.isIndeterminate = false
+                index.clear()
+                yamlFiles.forEachIndexed { idx, filePath ->
+                    indicator.fraction = idx.toDouble() / yamlFiles.size
+                    indicator.text2 = File(filePath).name
+                    indexFile(filePath)
+                }
+                rebuildUpstreamCache()
+            }
+
+            override fun onSuccess() {
+                notifyIndexUpdated()
+                onComplete?.invoke()
+            }
+        }.queue()
+    }
+
+    /**
+     * Performs a full index synchronously (use only from background threads or tests).
      */
     fun fullIndex() {
         val basePath = project.basePath ?: return
@@ -104,7 +150,6 @@ class TemplateIndexService(private val project: Project) {
      */
     private fun rebuildUpstreamCache() {
         upstreamCache.clear()
-        val basePath = project.basePath ?: return
 
         for ((callerPath, fileIndex) in index) {
             for (ref in fileIndex.templateRefs) {
@@ -116,6 +161,17 @@ class TemplateIndexService(private val project: Project) {
                         upstreamCache[targetPath] = existing + callerPath
                     }
                 }
+            }
+        }
+    }
+
+    /**
+     * Invokes all registered index listeners on the EDT.
+     */
+    private fun notifyIndexUpdated() {
+        ApplicationManager.getApplication().invokeLater {
+            for (listener in indexListeners) {
+                listener()
             }
         }
     }

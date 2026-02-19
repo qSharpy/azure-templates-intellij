@@ -4,9 +4,10 @@ import com.bogdanbujor.azuretemplates.core.*
 import com.intellij.codeInsight.completion.*
 import com.intellij.codeInsight.lookup.LookupElementBuilder
 import com.intellij.icons.AllIcons
+import com.intellij.openapi.application.ReadAction
+import com.intellij.openapi.vfs.LocalFileSystem
 import com.intellij.patterns.PlatformPatterns
 import com.intellij.util.ProcessingContext
-import java.io.File
 
 /**
  * Completion contributor for YAML template parameter names.
@@ -52,7 +53,11 @@ class TemplateCompletionContributor : CompletionContributor() {
                     if (resolved == null || resolved.unknownAlias || resolved.filePath == null) return
 
                     val filePath = resolved.filePath
-                    val templateText = try { File(filePath).readText() } catch (e: Exception) { return }
+                    val templateText = ReadAction.compute<String?, Throwable> {
+                        val vf = LocalFileSystem.getInstance().findFileByPath(filePath)
+                            ?: return@compute null
+                        try { String(vf.contentsToByteArray(), vf.charset) } catch (e: Exception) { null }
+                    } ?: return
 
                     // Step 4: Parse declared parameters
                     val declared = ParameterParser.parse(templateText)
@@ -64,7 +69,6 @@ class TemplateCompletionContributor : CompletionContributor() {
 
                     // Step 6: Build CompletionItems
                     for (param in declared) {
-                        val detail = "${param.type}${if (param.required) " (required)" else ""}"
                         val alreadySet = param.name in alreadyPassed
 
                         val priority = when {

@@ -1,6 +1,7 @@
 package com.bogdanbujor.azuretemplates.core
 
-import java.io.File
+import com.intellij.openapi.application.ReadAction
+import com.intellij.openapi.vfs.LocalFileSystem
 
 /**
  * Validates a single template call site and returns a list of diagnostic issues.
@@ -78,12 +79,13 @@ object CallSiteValidator {
 
         val filePath = resolved.filePath
 
-        // Read the template
-        val templateText = try {
-            File(filePath).readText()
-        } catch (e: Exception) {
-            return diagnostics // file not found — hoverProvider already handles this
-        }
+        // Read the template via VFS inside a ReadAction to avoid blocking the EDT.
+        // Refresh the VFS entry first so we always read the latest saved content.
+        val templateText = ReadAction.compute<String?, Throwable> {
+            val vf = LocalFileSystem.getInstance().refreshAndFindFileByPath(filePath)
+                ?: return@compute null
+            try { String(vf.contentsToByteArray(), vf.charset) } catch (e: Exception) { null }
+        } ?: return diagnostics // file not found — hoverProvider already handles this
 
         // Parse declared parameters from the template
         val declared = ParameterParser.parse(templateText)

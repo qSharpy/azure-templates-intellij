@@ -199,13 +199,15 @@ object GraphBuilder {
         }
 
         // ── Pass 3: fill in paramCount for all resolvable nodes ─────────────
-        for ((_, node) in nodeMap) {
+        for ((id, node) in nodeMap.entries.toList()) {
             if (node.filePath != null && node.kind != NodeKind.MISSING) {
                 try {
                     val tplText = File(node.filePath).readText()
                     val params = ParameterParser.parse(tplText)
-                    node.paramCount = params.size
-                    node.requiredCount = params.count { it.required }
+                    nodeMap[id] = node.copy(
+                        paramCount = params.size,
+                        requiredCount = params.count { it.required }
+                    )
                 } catch (e: Exception) { /* ignore */ }
             }
         }

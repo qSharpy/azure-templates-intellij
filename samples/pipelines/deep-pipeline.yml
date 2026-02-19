@@ -49,7 +49,7 @@ stages:
   # ============================================================
   - template: /samples/stages/ci-stage.yml
     parameters:
-      stageName: 'CI_Build'
+      stageName: asd
       displayName: 'CI — Build & Unit Tests'
       project: 'src/$(serviceName)/**/*.csproj'
       testProject: 'tests/$(serviceName).UnitTests/**/*.csproj'
@@ -61,7 +61,6 @@ stages:
       pushImage: false
       collectCoverage: true
       notifyWebhookUrl: $(teamsWebhookUrl)
-      notifyMessage: 'CI build completed for $(serviceName)'
 
   # ============================================================
   # CI STAGE WITH INTEGRATION TESTS
@@ -83,7 +82,7 @@ stages:
       runIntegrationTests: true
       integrationTestProject: 'tests/$(serviceName).IntegrationTests/**/*.csproj'
       notifyWebhookUrl: $(teamsWebhookUrl)
-      notifyMessage: 'Integration tests completed for $(serviceName)'
+      notifyMessage: 123
       dependsOn:
         - CI_Build
       condition: and(succeeded(), ne(variables['Build.Reason'], 'PullRequest'))

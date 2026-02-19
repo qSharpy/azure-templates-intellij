@@ -1,9 +1,13 @@
 package com.bogdanbujor.azuretemplates.ui
 
 import com.bogdanbujor.azuretemplates.core.*
+import com.bogdanbujor.azuretemplates.services.TemplateIndexService
 import com.intellij.icons.AllIcons
+import com.intellij.openapi.application.ApplicationManager
 import com.intellij.openapi.fileEditor.FileEditorManager
 import com.intellij.openapi.fileEditor.OpenFileDescriptor
+import com.intellij.openapi.progress.ProgressIndicator
+import com.intellij.openapi.progress.Task
 import com.intellij.openapi.project.DumbAware
 import com.intellij.openapi.project.Project
 import com.intellij.openapi.vfs.LocalFileSystem
@@ -48,6 +52,11 @@ data class DiagnosticNodeData(
 
 class DiagnosticsPanel(private val project: Project) {
 
+    companion object {
+        private val COMMENT_STRIP_REGEX = Regex("(^\\s*#.*|\\s#.*)$")
+        private val TEMPLATE_REF_REGEX = Regex("(?:^|\\s)-?\\s*template\\s*:\\s*(.+)$")
+    }
+
     private val root = DefaultMutableTreeNode(DiagnosticNodeData("Diagnostics", icon = AllIcons.General.InspectionsEye))
     private val treeModel = DefaultTreeModel(root)
     private val tree = Tree(treeModel)
@@ -71,90 +80,111 @@ class DiagnosticsPanel(private val project: Project) {
 
         component = JBScrollPane(tree)
 
+        // Subscribe to index-updated events so the panel refreshes automatically
+        // whenever a YAML file is saved or the index is rebuilt.
+        TemplateIndexService.getInstance(project).addIndexListener { refresh() }
+
         // Initial refresh so the panel is populated on creation
         refresh()
     }
 
     fun refresh() {
         val basePath = project.basePath ?: return
-        val yamlFiles = GraphBuilder.collectYamlFiles(File(basePath))
+        val indexService = TemplateIndexService.getInstance(project)
 
-        root.removeAllChildren()
+        // If the index is empty, trigger background indexing and re-run refresh when done.
+        if (indexService.getAllFiles().isEmpty()) {
+            indexService.fullIndexAsync(onComplete = { refresh() })
+            return
+        }
 
-        var totalErrors = 0
-        var totalWarnings = 0
+        // Collect diagnostics on a background thread, then update the tree on the EDT.
+        object : Task.Backgroundable(project, "Refreshing Azure Pipeline diagnostics…", false) {
+            private val fileNodes = mutableListOf<Pair<DefaultMutableTreeNode, String>>()
 
-        for (filePath in yamlFiles) {
-            val text = try { File(filePath).readText() } catch (e: Exception) { continue }
-            val lines = text.replace("\r\n", "\n").split("\n")
-            val repoAliases = RepositoryAliasParser.parse(text)
+            override fun run(indicator: ProgressIndicator) {
+                val allFiles = indexService.getAllFiles().toList()
+                indicator.isIndeterminate = false
 
-            val fileIssues = mutableListOf<DiagnosticIssue>()
+                allFiles.forEachIndexed { idx, filePath ->
+                    indicator.fraction = idx.toDouble() / allFiles.size
+                    indicator.text2 = File(filePath).name
 
-            for (i in lines.indices) {
-                val line = lines[i]
-                val stripped = line.replace(Regex("(^\\s*#.*|\\s#.*)$"), "")
-                val match = Regex("(?:^|\\s)-?\\s*template\\s*:\\s*(.+)$").find(stripped) ?: continue
+                    val fileIndex = indexService.getFileIndex(filePath) ?: return@forEachIndexed
+                    if (fileIndex.templateRefs.isEmpty()) return@forEachIndexed
 
-                val templateRef = match.groupValues[1].trim()
-                if (templateRef.contains("\${") || templateRef.contains("\$(")) continue
+                    // Re-read lines from disk for CallSiteValidator.
+                    val text = try { File(filePath).readText() } catch (e: Exception) { return@forEachIndexed }
+                    val rawLines = text.replace("\r\n", "\n").split("\n")
 
-                val issues = CallSiteValidator.validate(lines, i, templateRef, filePath, repoAliases)
-                fileIssues.addAll(issues)
-            }
+                    val fileIssues = mutableListOf<DiagnosticIssue>()
 
-            if (fileIssues.isNotEmpty()) {
-                val errors = fileIssues.count { it.severity == IssueSeverity.ERROR }
-                val warnings = fileIssues.count { it.severity == IssueSeverity.WARNING }
-                totalErrors += errors
-                totalWarnings += warnings
-
-                val relativePath = try {
-                    File(filePath).relativeTo(File(basePath)).path
-                } catch (e: Exception) {
-                    File(filePath).name
-                }
-
-                val fileIcon = if (errors > 0) AllIcons.General.Error else AllIcons.General.Warning
-                val fileLabel = "$relativePath ($errors errors, $warnings warnings)"
-
-                val fileNode = DefaultMutableTreeNode(
-                    DiagnosticNodeData(
-                        label = fileLabel,
-                        filePath = filePath,
-                        icon = fileIcon,
-                        isFile = true
-                    )
-                )
-
-                for (issue in fileIssues) {
-                    val issueIcon = when (issue.severity) {
-                        IssueSeverity.ERROR -> AllIcons.General.Error
-                        IssueSeverity.WARNING -> AllIcons.General.Warning
+                    for (i in rawLines.indices) {
+                        val stripped = rawLines[i].replace(COMMENT_STRIP_REGEX, "")
+                        val match = TEMPLATE_REF_REGEX.find(stripped) ?: continue
+                        val templateRef = match.groupValues[1].trim()
+                        if (templateRef.contains("\${") || templateRef.contains("\$(")) continue
+                        val issues = CallSiteValidator.validate(rawLines, i, templateRef, filePath, fileIndex.repoAliases)
+                        fileIssues.addAll(issues)
                     }
-                    val issueLabel = "Line ${issue.line + 1}: ${issue.message}"
 
-                    fileNode.add(DefaultMutableTreeNode(
-                        DiagnosticNodeData(
-                            label = issueLabel,
-                            filePath = filePath,
-                            line = issue.line,
-                            column = issue.startColumn,
-                            icon = issueIcon
+                    if (fileIssues.isNotEmpty()) {
+                        val errors = fileIssues.count { it.severity == IssueSeverity.ERROR }
+                        val warnings = fileIssues.count { it.severity == IssueSeverity.WARNING }
+
+                        val relativePath = try {
+                            File(filePath).relativeTo(File(basePath)).path
+                        } catch (e: Exception) {
+                            File(filePath).name
+                        }
+
+                        val fileIcon = if (errors > 0) AllIcons.General.Error else AllIcons.General.Warning
+                        val fileLabel = "$relativePath ($errors errors, $warnings warnings)"
+
+                        val fileNode = DefaultMutableTreeNode(
+                            DiagnosticNodeData(
+                                label = fileLabel,
+                                filePath = filePath,
+                                icon = fileIcon,
+                                isFile = true
+                            )
                         )
-                    ))
+
+                        for (issue in fileIssues) {
+                            val issueIcon = when (issue.severity) {
+                                IssueSeverity.ERROR -> AllIcons.General.Error
+                                IssueSeverity.WARNING -> AllIcons.General.Warning
+                            }
+                            fileNode.add(DefaultMutableTreeNode(
+                                DiagnosticNodeData(
+                                    label = "Line ${issue.line + 1}: ${issue.message}",
+                                    filePath = filePath,
+                                    line = issue.line,
+                                    column = issue.startColumn,
+                                    icon = issueIcon
+                                )
+                            ))
+                        }
+
+                        fileNodes.add(Pair(fileNode, filePath))
+                    }
                 }
-
-                root.add(fileNode)
             }
-        }
 
-        treeModel.reload()
-
-        // Expand all file nodes
-        for (i in 0 until tree.rowCount) {
-            tree.expandRow(i)
-        }
+            override fun onSuccess() {
+                // Update the tree on the EDT
+                ApplicationManager.getApplication().invokeLater {
+                    root.removeAllChildren()
+                    for ((fileNode, _) in fileNodes) {
+                        root.add(fileNode)
+                    }
+                    treeModel.reload()
+                    for (i in 0 until tree.rowCount) {
+                        tree.expandRow(i)
+                    }
+                }
+            }
+        }.queue()
     }
 
     private fun navigateTo(filePath: String, line: Int, column: Int) {

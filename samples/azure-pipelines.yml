@@ -111,6 +111,5 @@ stages:
                 # Notify on completion
                 - template: templates/notify-teams.yml
                   parameters:
-                    #message: 'Deployment to Production complete!'
-                    environment: 'Production'
-                    includeRunLink: asd
+                    message: 'Deployment to Production complete!'
+                    includeRunLink: true

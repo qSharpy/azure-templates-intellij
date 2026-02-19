@@ -29,6 +29,9 @@ object PassedParameterParser {
 
         var inParamsBlock = false
         var paramsIndent = -1
+        // The indent of the first non-empty line directly under "parameters:" —
+        // determined lazily on first encounter so we handle any indent width.
+        var childIndent = -1
 
         for (i in (templateLine + 1) until lines.size) {
             val raw = lines[i]
@@ -56,19 +59,23 @@ object PassedParameterParser {
             // If we've gone back to or past the parameters: indent, we're done
             if (lineIndent <= paramsIndent) break
 
-            // Only capture direct children of the parameters block
-            if (lineIndent == paramsIndent + 2 || lineIndent == paramsIndent + 4) {
-                // Match "  paramName: value" -- skip nested objects/arrays for now
+            // Determine the child indent level from the first non-empty line we see
+            if (childIndent == -1) {
+                childIndent = lineIndent
+            }
+
+            // Only capture direct children of the parameters block (at the first child indent level)
+            if (lineIndent == childIndent) {
                 val paramMatch = PARAM_ENTRY.find(trimmed)
-                if (paramMatch != null && lineIndent > paramsIndent) {
+                if (paramMatch != null) {
                     val paramName = paramMatch.groupValues[2]
                     val paramValue = paramMatch.groupValues[3].trim()
-                    // Only capture at the first level below parameters:
-                    if (!passed.containsKey(paramName) || lineIndent == paramsIndent + 2) {
+                    if (!passed.containsKey(paramName)) {
                         passed[paramName] = Pair(paramValue, i)
                     }
                 }
             }
+            // Lines deeper than childIndent are nested values — skip them
         }
 
         return passed

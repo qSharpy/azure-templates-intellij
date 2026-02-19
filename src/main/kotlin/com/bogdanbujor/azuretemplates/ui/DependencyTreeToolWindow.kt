@@ -117,10 +117,12 @@ class DependencyTreePanel(private val project: Project) {
 
         root.removeAllChildren()
 
-        // Ensure index is built
+        // Ensure index is built — kick off background indexing if the index is empty,
+        // then re-run refresh once it completes so the tree is populated.
         val indexService = TemplateIndexService.getInstance(project)
         if (indexService.getAllFiles().isEmpty()) {
-            indexService.fullIndex()
+            indexService.fullIndexAsync(onComplete = { refresh(file) })
+            return
         }
 
         // Upstream callers — added as a top-level node ABOVE the file node
