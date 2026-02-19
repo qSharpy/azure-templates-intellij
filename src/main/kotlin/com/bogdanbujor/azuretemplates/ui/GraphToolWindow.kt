@@ -84,7 +84,6 @@ class GraphPanel(private val project: Project) {
 
     private fun loadHtml() {
         val d3Js = loadResource("/media/d3.min.js")
-        val graphJs = loadResource("/media/graph.js")
 
         val html = """
             <!DOCTYPE html>
@@ -92,14 +91,14 @@ class GraphPanel(private val project: Project) {
             <head>
                 <meta charset="UTF-8">
                 <style>
-                    body { margin: 0; padding: 0; overflow: hidden; background: #1e1e1e; color: #ccc; font-family: sans-serif; }
-                    svg { width: 100%; height: 100%; }
+                    html, body { margin: 0; padding: 0; width: 100%; height: 100%; overflow: hidden; background: #1e1e1e; color: #ccc; font-family: sans-serif; }
+                    svg { position: absolute; top: 0; left: 0; width: 100%; height: 100%; }
                     .node circle { stroke: #fff; stroke-width: 1.5px; cursor: pointer; }
                     .node text { font-size: 10px; fill: #ccc; pointer-events: none; }
                     .link { stroke: #555; stroke-opacity: 0.6; stroke-width: 1px; }
                     .link-label { font-size: 8px; fill: #888; }
-                    #controls { position: absolute; top: 10px; right: 10px; z-index: 10; }
-                    #controls button { margin: 2px; padding: 4px 8px; background: #333; color: #ccc; border: 1px solid #555; cursor: pointer; border-radius: 3px; }
+                    #controls { position: absolute; top: 10px; right: 10px; z-index: 10; display: flex; gap: 4px; }
+                    #controls button { padding: 4px 8px; background: #333; color: #ccc; border: 1px solid #555; cursor: pointer; border-radius: 3px; font-size: 12px; }
                     #controls button:hover { background: #444; }
                     #search { position: absolute; top: 10px; left: 10px; z-index: 10; }
                     #search input { padding: 4px 8px; background: #333; color: #ccc; border: 1px solid #555; border-radius: 3px; }
@@ -114,6 +113,8 @@ class GraphPanel(private val project: Project) {
             <body>
                 <div id="search"><input type="text" id="searchInput" placeholder="Search nodes..." /></div>
                 <div id="controls">
+                    <button onclick="zoomIn()" title="Zoom In">+</button>
+                    <button onclick="zoomOut()" title="Zoom Out">−</button>
                     <button onclick="fitGraph()">Fit</button>
                     <button onclick="resetGraph()">Reset</button>
                     <button onclick="toggleScope()">Toggle Scope</button>
@@ -141,11 +142,36 @@ class GraphPanel(private val project: Project) {
                         const width = window.innerWidth;
                         const height = window.innerHeight;
                         
-                        zoom = d3.zoom().scaleExtent([0.1, 4]).on('zoom', (event) => {
-                            g.attr('transform', event.transform);
-                        });
+                        zoom = d3.zoom()
+                            .scaleExtent([0.1, 4])
+                            .on('zoom', (event) => {
+                                g.attr('transform', event.transform);
+                            });
                         
                         svg.call(zoom);
+                        
+                        // Disable default double-click zoom (only zooms in, confusing)
+                        svg.on('dblclick.zoom', null);
+                        
+                        // Explicit wheel zoom fallback for JBCef
+                        document.getElementById('graph').addEventListener('wheel', function(e) {
+                            e.preventDefault();
+                            const currentTransform = d3.zoomTransform(svg.node());
+                            const scaleFactor = e.deltaY < 0 ? 1.1 : 0.9;
+                            const newScale = Math.max(0.1, Math.min(4, currentTransform.k * scaleFactor));
+                            
+                            // Zoom toward mouse position
+                            const rect = this.getBoundingClientRect();
+                            const mouseX = e.clientX - rect.left;
+                            const mouseY = e.clientY - rect.top;
+                            
+                            const newTransform = d3.zoomIdentity
+                                .translate(mouseX, mouseY)
+                                .scale(newScale)
+                                .translate(-(mouseX - currentTransform.x) / currentTransform.k, -(mouseY - currentTransform.y) / currentTransform.k);
+                            
+                            svg.call(zoom.transform, newTransform);
+                        }, { passive: false });
                         g = svg.append('g');
                         
                         link = g.append('g').attr('class', 'links').selectAll('line');
@@ -240,6 +266,18 @@ class GraphPanel(private val project: Project) {
                     function dragended(event, d) {
                         if (!event.active) simulation.alphaTarget(0);
                         d.fx = null; d.fy = null;
+                    }
+                    
+                    function zoomIn() {
+                        const currentTransform = d3.zoomTransform(svg.node());
+                        const newScale = Math.min(4, currentTransform.k * 1.3);
+                        svg.transition().duration(300).call(zoom.scaleTo, newScale);
+                    }
+                    
+                    function zoomOut() {
+                        const currentTransform = d3.zoomTransform(svg.node());
+                        const newScale = Math.max(0.1, currentTransform.k / 1.3);
+                        svg.transition().duration(300).call(zoom.scaleTo, newScale);
                     }
                     
                     function fitGraph() {
