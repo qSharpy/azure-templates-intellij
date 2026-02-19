@@ -28,7 +28,12 @@ class DiagnosticsToolWindow : ToolWindowFactory, DumbAware {
     override fun createToolWindowContent(project: Project, toolWindow: ToolWindow) {
         val panel = DiagnosticsPanel(project)
         val content = ContentFactory.getInstance().createContent(panel.component, "", false)
+        content.putUserData(PANEL_KEY, panel)
         toolWindow.contentManager.addContent(content)
+    }
+
+    companion object {
+        val PANEL_KEY = com.intellij.openapi.util.Key.create<DiagnosticsPanel>("DiagnosticsPanel")
     }
 }
 
@@ -65,6 +70,9 @@ class DiagnosticsPanel(private val project: Project) {
         })
 
         component = JBScrollPane(tree)
+
+        // Initial refresh so the panel is populated on creation
+        refresh()
     }
 
     fun refresh() {
