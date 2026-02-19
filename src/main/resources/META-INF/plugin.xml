@@ -3,10 +3,44 @@
     <name>Azure Templates Navigator</name>
     <vendor email="bogdan@bogdanbujor.com" url="https://github.com/qSharpy">bogdanbujor</vendor>
     <description><![CDATA[
-        Hover over Azure Pipeline template references to see parameters.
-        Click to navigate. Validates parameters, provides autocomplete,
-        variable hover, dependency tree, and interactive template graph.
+        <p><b>Azure Templates Navigator</b> supercharges your Azure DevOps pipeline development in IntelliJ-based IDEs.</p>
+
+        <p>Working with Azure Pipelines templates across multiple repositories? This plugin gives you full IDE support
+        for template references — hover documentation, go-to-declaration, autocompletion, and real-time validation.</p>
+
+        <h3>Features</h3>
+        <ul>
+            <li><b>Hover Documentation</b> — hover over any template reference to see its parameters, types, and default values</li>
+            <li><b>Go-to-Declaration</b> — Ctrl+Click (or Cmd+Click) on a template path to jump directly to the template file</li>
+            <li><b>Parameter Autocompletion</b> — get intelligent suggestions for template parameters as you type</li>
+            <li><b>Parameter Validation</b> — real-time inspections flag missing required parameters and unknown parameter names</li>
+            <li><b>Variable Hover</b> — hover over pipeline variables to see their values</li>
+            <li><b>Dependency Tree</b> — visualize the full template dependency hierarchy in a dedicated tool window</li>
+            <li><b>Interactive Graph</b> — explore template relationships with an interactive D3.js-powered graph visualization</li>
+            <li><b>Diagnostics Panel</b> — see all template issues across your project in one place</li>
+            <li><b>Cross-Repository Support</b> — resolves templates from sibling repositories on disk</li>
+        </ul>
+
+        <h3>Supported File Types</h3>
+        <p>YAML files containing Azure Pipelines definitions (azure-pipelines.yml, templates, stages, jobs, etc.)</p>
     ]]></description>
+
+    <change-notes><![CDATA[
+        <h3>1.0.0</h3>
+        <ul>
+            <li>Initial release</li>
+            <li>Template parameter hover documentation</li>
+            <li>Go-to-declaration for template references</li>
+            <li>Parameter autocompletion with type information</li>
+            <li>Real-time template parameter validation inspections</li>
+            <li>Gutter icons for template references</li>
+            <li>Dependency tree tool window</li>
+            <li>Interactive D3.js template graph visualization</li>
+            <li>Diagnostics tool window for project-wide template issues</li>
+            <li>Cross-repository template resolution</li>
+            <li>Configurable sibling repository paths</li>
+        </ul>
+    ]]></change-notes>
 
     <depends>com.intellij.modules.platform</depends>
     <depends>org.jetbrains.plugins.yaml</depends>
