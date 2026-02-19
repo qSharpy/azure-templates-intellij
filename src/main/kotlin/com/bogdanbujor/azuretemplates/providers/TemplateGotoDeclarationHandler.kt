@@ -4,8 +4,6 @@ import com.bogdanbujor.azuretemplates.core.*
 import com.intellij.codeInsight.navigation.actions.GotoDeclarationHandler
 import com.intellij.openapi.actionSystem.DataContext
 import com.intellij.openapi.editor.Editor
-import com.intellij.openapi.fileEditor.FileEditorManager
-import com.intellij.openapi.fileEditor.OpenFileDescriptor
 import com.intellij.openapi.vfs.LocalFileSystem
 import com.intellij.psi.PsiElement
 import com.intellij.psi.PsiManager
@@ -96,6 +94,13 @@ class TemplateGotoDeclarationHandler : GotoDeclarationHandler {
         return resolveTemplateTarget(templateRefFromLine, docText, currentFilePath, paramDef.line, psiFile)
     }
 
+    /**
+     * Resolves a template reference to a PsiElement target at the given line.
+     *
+     * Returns a PsiElement at the target line offset so IntelliJ handles navigation
+     * automatically. Does NOT call openTextEditor() — that would require the EDT
+     * and getGotoDeclarationTargets() runs on a background read-action thread.
+     */
     private fun resolveTemplateTarget(
         templateRef: String,
         docText: String,
@@ -114,10 +119,17 @@ class TemplateGotoDeclarationHandler : GotoDeclarationHandler {
         val project = contextFile.project
         val psiFile = PsiManager.getInstance(project).findFile(virtualFile) ?: return null
 
-        // Navigate to the target line
+        // Find the PsiElement at the target line so IntelliJ navigates there automatically.
+        // If targetLine is 0, return the file itself (navigates to top of file).
         if (targetLine > 0) {
-            val descriptor = OpenFileDescriptor(project, virtualFile, targetLine, 0)
-            FileEditorManager.getInstance(project).openTextEditor(descriptor, true)
+            val targetDocument = com.intellij.psi.PsiDocumentManager.getInstance(project).getDocument(psiFile)
+            if (targetDocument != null && targetLine < targetDocument.lineCount) {
+                val targetOffset = targetDocument.getLineStartOffset(targetLine)
+                val elementAtTarget = psiFile.findElementAt(targetOffset)
+                if (elementAtTarget != null) {
+                    return arrayOf(elementAtTarget)
+                }
+            }
         }
 
         return arrayOf(psiFile)
