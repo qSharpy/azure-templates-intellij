@@ -100,6 +100,7 @@ class GraphPanel(private val project: Project) {
                     #controls { position: absolute; top: 10px; right: 10px; z-index: 10; display: flex; gap: 4px; }
                     #controls button { padding: 4px 8px; background: #333; color: #ccc; border: 1px solid #555; cursor: pointer; border-radius: 3px; font-size: 12px; }
                     #controls button:hover { background: #444; }
+                    #controls button.active { background: #0d6efd; color: #fff; border-color: #0d6efd; }
                     #search { position: absolute; top: 10px; left: 10px; z-index: 10; }
                     #search input { padding: 4px 8px; background: #333; color: #ccc; border: 1px solid #555; border-radius: 3px; }
                     .node.pipeline circle { fill: #4CAF50; }
@@ -128,6 +129,7 @@ class GraphPanel(private val project: Project) {
                     <button onclick="fitGraph()">Fit</button>
                     <button onclick="resetGraph()">Reset</button>
                     <button onclick="toggleScope()">Toggle Scope</button>
+                    <button id="btnFullPath" onclick="toggleFullPath()" title="Toggle between filename and full workspace-relative path labels">Full Path</button>
                 </div>
                 <div id="legend">
                     <button id="legend-toggle" onclick="document.getElementById('legend-toggle').classList.toggle('open'); document.getElementById('legend-content').classList.toggle('open');">
@@ -174,6 +176,7 @@ class GraphPanel(private val project: Project) {
                     let svg, g, link, node, linkLabel;
                     let zoom;
                     let fileScopeMode = false;
+                    let showFullPath = false;
                     
                     // Track drag distance to distinguish click from drag
                     let dragStartX = 0, dragStartY = 0, dragMoved = false;
@@ -188,6 +191,52 @@ class GraphPanel(private val project: Project) {
                         if (e.direction === 'upstream')   return 'url(#arrow-upstream)';
                         if (e.direction === 'downstream') return 'url(#arrow)';
                         return 'url(#arrow-default)';
+                    }
+                    
+                    /**
+                     * Returns the display label for a node based on the current showFullPath setting.
+                     */
+                    function nodeLabel(d) {
+                        if (showFullPath && d.relativePath) {
+                            return d.relativePath;
+                        }
+                        return d.label + (d.paramCount > 0 ? ' (' + d.paramCount + ')' : '');
+                    }
+                    
+                    /**
+                     * Truncates a string to a maximum length.
+                     */
+                    function truncateLabel(str, max) {
+                        if (!str) return '';
+                        return str.length > max ? str.slice(0, max - 1) + '…' : str;
+                    }
+                    
+                    /**
+                     * Updates only the text labels of existing nodes (no simulation restart needed).
+                     */
+                    function updateNodeLabels() {
+                        d3.select('.nodes').selectAll('g').select('text')
+                            .text(function(d) { return truncateLabel(nodeLabel(d), showFullPath ? 60 : 30); });
+                    }
+                    
+                    /**
+                     * Updates the visual state of the full-path button.
+                     */
+                    function updateFullPathButton() {
+                        var btn = document.getElementById('btnFullPath');
+                        if (showFullPath) {
+                            btn.classList.add('active');
+                            btn.title = 'Showing full workspace-relative paths — click to show filenames only';
+                        } else {
+                            btn.classList.remove('active');
+                            btn.title = 'Toggle between filename and full workspace-relative path labels';
+                        }
+                    }
+                    
+                    function toggleFullPath() {
+                        showFullPath = !showFullPath;
+                        updateFullPathButton();
+                        updateNodeLabels();
                     }
                     
                     function initGraph() {
@@ -242,7 +291,8 @@ class GraphPanel(private val project: Project) {
                             const query = this.value.toLowerCase();
                             node.style('opacity', d => {
                                 if (!query) return 1;
-                                return (d.label || '').toLowerCase().includes(query) ? 1 : 0.2;
+                                return ((d.label || '').toLowerCase().includes(query) ||
+                                        (d.relativePath || '').toLowerCase().includes(query)) ? 1 : 0.2;
                             });
                         });
                         
@@ -292,7 +342,7 @@ class GraphPanel(private val project: Project) {
                         nodeEnter.append('text')
                             .attr('dx', 12)
                             .attr('dy', '.35em')
-                            .text(d => d.label + (d.paramCount > 0 ? ' (' + d.paramCount + ')' : ''));
+                            .text(d => truncateLabel(nodeLabel(d), showFullPath ? 60 : 30));
                         
                         nodeEnter.append('title').text(d => d.relativePath || d.label);
                         

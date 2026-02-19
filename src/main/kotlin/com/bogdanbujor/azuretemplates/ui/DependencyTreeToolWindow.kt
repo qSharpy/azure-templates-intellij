@@ -3,6 +3,7 @@ package com.bogdanbujor.azuretemplates.ui
 import com.bogdanbujor.azuretemplates.core.*
 import com.bogdanbujor.azuretemplates.services.TemplateIndexService
 import com.intellij.icons.AllIcons
+import com.intellij.openapi.actionSystem.*
 import com.intellij.openapi.fileEditor.FileEditorManager
 import com.intellij.openapi.fileEditor.FileEditorManagerListener
 import com.intellij.openapi.fileEditor.OpenFileDescriptor
@@ -17,10 +18,12 @@ import com.intellij.ui.SimpleTextAttributes
 import com.intellij.ui.components.JBScrollPane
 import com.intellij.ui.content.ContentFactory
 import com.intellij.ui.treeStructure.Tree
+import java.awt.BorderLayout
 import java.awt.event.MouseAdapter
 import java.awt.event.MouseEvent
 import java.io.File
 import javax.swing.Icon
+import javax.swing.JPanel
 import javax.swing.JTree
 import javax.swing.tree.DefaultMutableTreeNode
 import javax.swing.tree.DefaultTreeModel
@@ -41,6 +44,7 @@ class DependencyTreeToolWindow : ToolWindowFactory, DumbAware {
 
 data class TreeNodeData(
     val label: String,
+    val fullPathLabel: String? = null,
     val filePath: String? = null,
     val icon: Icon = AllIcons.FileTypes.Yaml,
     val isGroup: Boolean = false,
@@ -52,11 +56,12 @@ class DependencyTreePanel(private val project: Project) {
     private val root = DefaultMutableTreeNode(TreeNodeData("No file selected", isGroup = true))
     private val treeModel = DefaultTreeModel(root)
     private val tree = Tree(treeModel)
-    val component: JBScrollPane
+    private var showFullPath = false
+    val component: JPanel
 
     init {
         tree.isRootVisible = false
-        tree.cellRenderer = TemplateTreeCellRenderer()
+        tree.cellRenderer = TemplateTreeCellRenderer { showFullPath }
 
         // Double-click to open file
         tree.addMouseListener(object : MouseAdapter() {
@@ -70,7 +75,20 @@ class DependencyTreePanel(private val project: Project) {
             }
         })
 
-        component = JBScrollPane(tree)
+        // Build the main panel with toolbar
+        val mainPanel = JPanel(BorderLayout())
+
+        // Create toolbar with toggle action
+        val actionGroup = DefaultActionGroup().apply {
+            add(ToggleFullPathAction())
+        }
+        val toolbar = ActionManager.getInstance()
+            .createActionToolbar("AzureTemplatesDependencyTree", actionGroup, true)
+        toolbar.targetComponent = mainPanel
+        mainPanel.add(toolbar.component, BorderLayout.NORTH)
+        mainPanel.add(JBScrollPane(tree), BorderLayout.CENTER)
+
+        component = mainPanel
 
         // Listen for editor changes
         project.messageBus.connect().subscribe(
@@ -113,9 +131,15 @@ class DependencyTreePanel(private val project: Project) {
                 TreeNodeData("Called by", isGroup = true, icon = AllIcons.General.ArrowDown, description = callerCountText)
             )
             for (callerPath in callers) {
+                val relativePath = try {
+                    File(callerPath).relativeTo(File(basePath)).path.replace("\\", "/")
+                } catch (e: Exception) {
+                    File(callerPath).name
+                }
                 callersNode.add(DefaultMutableTreeNode(
                     TreeNodeData(
                         label = File(callerPath).name,
+                        fullPathLabel = relativePath,
                         filePath = callerPath,
                         icon = AllIcons.FileTypes.Yaml
                     )
@@ -125,9 +149,15 @@ class DependencyTreePanel(private val project: Project) {
         }
 
         // File node with downstream dependencies as children
+        val fileRelativePath = try {
+            File(filePath).relativeTo(File(basePath)).path.replace("\\", "/")
+        } catch (e: Exception) {
+            targetFile.name
+        }
         val fileNode = DefaultMutableTreeNode(
             TreeNodeData(
                 label = targetFile.name,
+                fullPathLabel = fileRelativePath,
                 filePath = filePath,
                 icon = AllIcons.FileTypes.Yaml
             )
@@ -189,9 +219,15 @@ class DependencyTreePanel(private val project: Project) {
 
             // Cycle detection
             if (resolvedPath in visited) {
+                val cycleRelPath = try {
+                    File(resolvedPath).relativeTo(File(basePath)).path.replace("\\", "/")
+                } catch (e: Exception) {
+                    File(resolvedPath).name
+                }
                 parentNode.add(DefaultMutableTreeNode(
                     TreeNodeData(
                         label = "${File(resolvedPath).name} (cycle)",
+                        fullPathLabel = "$cycleRelPath (cycle)",
                         filePath = resolvedPath,
                         icon = AllIcons.Actions.Undo
                     )
@@ -205,9 +241,19 @@ class DependencyTreePanel(private val project: Project) {
             } else {
                 File(resolvedPath).name
             }
+            val relativePath = try {
+                File(resolvedPath).relativeTo(File(basePath)).path.replace("\\", "/")
+            } catch (e: Exception) {
+                File(resolvedPath).name
+            }
+            val fullPathLabel = if (resolved.repoName != null) {
+                "$relativePath (@${resolved.alias})"
+            } else {
+                relativePath
+            }
 
             val childNode = DefaultMutableTreeNode(
-                TreeNodeData(label = label, filePath = resolvedPath, icon = icon)
+                TreeNodeData(label = label, fullPathLabel = fullPathLabel, filePath = resolvedPath, icon = icon)
             )
 
             // Recursively add children (with cycle detection)
@@ -229,12 +275,33 @@ class DependencyTreePanel(private val project: Project) {
         val descriptor = OpenFileDescriptor(project, virtualFile, 0, 0)
         FileEditorManager.getInstance(project).openTextEditor(descriptor, true)
     }
+
+    /**
+     * Toggle action for showing full paths in the dependency tree.
+     */
+    private inner class ToggleFullPathAction : ToggleAction(
+        "Show Full Path",
+        "Toggle between filename and full workspace-relative path labels",
+        AllIcons.Actions.ShowAsTree
+    ) {
+        override fun isSelected(e: AnActionEvent): Boolean = showFullPath
+
+        override fun setSelected(e: AnActionEvent, state: Boolean) {
+            showFullPath = state
+            tree.repaint()
+        }
+
+        override fun getActionUpdateThread(): ActionUpdateThread = ActionUpdateThread.EDT
+    }
 }
 
 /**
  * Custom tree cell renderer for the dependency tree.
+ * Uses [showFullPathProvider] to determine whether to display full paths.
  */
-class TemplateTreeCellRenderer : ColoredTreeCellRenderer() {
+class TemplateTreeCellRenderer(
+    private val showFullPathProvider: () -> Boolean = { false }
+) : ColoredTreeCellRenderer() {
     override fun customizeCellRenderer(
         tree: JTree,
         value: Any?,
@@ -247,7 +314,12 @@ class TemplateTreeCellRenderer : ColoredTreeCellRenderer() {
         val node = value as? DefaultMutableTreeNode ?: return
         val data = node.userObject as? TreeNodeData ?: return
         icon = data.icon
-        append(data.label, SimpleTextAttributes.REGULAR_ATTRIBUTES)
+        val displayLabel = if (showFullPathProvider() && data.fullPathLabel != null) {
+            data.fullPathLabel
+        } else {
+            data.label
+        }
+        append(displayLabel, SimpleTextAttributes.REGULAR_ATTRIBUTES)
         if (data.description != null) {
             append("  ${data.description}", SimpleTextAttributes.GRAYED_ATTRIBUTES)
         }
