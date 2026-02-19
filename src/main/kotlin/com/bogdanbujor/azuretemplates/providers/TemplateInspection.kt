@@ -1,6 +1,9 @@
 package com.bogdanbujor.azuretemplates.providers
 
 import com.bogdanbujor.azuretemplates.core.*
+import com.bogdanbujor.azuretemplates.quickfixes.AddMissingParameterFix
+import com.bogdanbujor.azuretemplates.quickfixes.FixTypeMismatchFix
+import com.bogdanbujor.azuretemplates.quickfixes.RemoveUnknownParameterFix
 import com.bogdanbujor.azuretemplates.settings.PluginSettings
 import com.intellij.codeInspection.*
 import com.intellij.psi.PsiElementVisitor
@@ -12,9 +15,9 @@ import com.intellij.psi.PsiFile
  * Port of getDiagnosticsForDocument() + validateCallSite() from the VS Code extension.
  *
  * Three checks per call site:
- * 1. Missing required parameters (ERROR)
- * 2. Unknown parameters (WARNING)
- * 3. Type mismatches (WARNING)
+ * 1. Missing required parameters (ERROR)  → quick-fix: AddMissingParameterFix
+ * 2. Unknown parameters (WARNING)         → quick-fix: RemoveUnknownParameterFix
+ * 3. Type mismatches (WARNING)            → quick-fix: FixTypeMismatchFix
  */
 class TemplateInspection : LocalInspectionTool() {
 
@@ -67,10 +70,59 @@ class TemplateInspection : LocalInspectionTool() {
                             IssueSeverity.WARNING -> ProblemHighlightType.WARNING
                         }
 
+                        // ── Attach the appropriate quick-fix ──────────────────
+                        val fixes: Array<LocalQuickFix> = when (issue.code) {
+                            "missing-required-param" -> {
+                                val name = issue.paramName ?: ""
+                                val type = issue.paramType ?: "string"
+                                if (name.isNotEmpty()) {
+                                    arrayOf(
+                                        AddMissingParameterFix(
+                                            paramName = name,
+                                            paramType = type,
+                                            insertAfterLine = issue.insertAfterLine,
+                                            templateLine = issue.line
+                                        )
+                                    )
+                                } else {
+                                    emptyArray()
+                                }
+                            }
+
+                            "unknown-param" -> {
+                                val name = issue.paramName ?: ""
+                                if (name.isNotEmpty()) {
+                                    arrayOf(RemoveUnknownParameterFix(paramName = name))
+                                } else {
+                                    emptyArray()
+                                }
+                            }
+
+                            "type-mismatch" -> {
+                                val name = issue.paramName ?: ""
+                                val type = issue.paramType ?: ""
+                                val value = issue.passedValue ?: ""
+                                if (name.isNotEmpty() && type.isNotEmpty() && value.isNotEmpty()) {
+                                    arrayOf(
+                                        FixTypeMismatchFix(
+                                            paramName = name,
+                                            paramType = type,
+                                            currentValue = value
+                                        )
+                                    )
+                                } else {
+                                    emptyArray()
+                                }
+                            }
+
+                            else -> emptyArray()
+                        }
+
                         holder.registerProblem(
                             element,
                             issue.message,
-                            severity
+                            severity,
+                            *fixes
                         )
                     }
                 }

@@ -97,6 +97,10 @@ object CallSiteValidator {
         val passed = PassedParameterParser.parse(lines, templateLine)
 
         // ── Check 1: Missing required parameters ──────────────────────────────
+        // Find the last line of the parameters block at this call site so the fix
+        // knows where to append the new entry.
+        val insertAfterLine = findInsertAfterLine(lines, templateLine)
+
         for (p in declared) {
             if (p.required && p.name !in passed) {
                 val templateLineText = lines[templateLine]
@@ -109,7 +113,10 @@ object CallSiteValidator {
                         code = "missing-required-param",
                         line = templateLine,
                         startColumn = startCol,
-                        endColumn = templateLineText.length
+                        endColumn = templateLineText.length,
+                        paramName = p.name,
+                        paramType = p.type,
+                        insertAfterLine = insertAfterLine
                     )
                 )
             }
@@ -129,7 +136,8 @@ object CallSiteValidator {
                         code = "unknown-param",
                         line = info.second,
                         startColumn = startCol,
-                        endColumn = endCol
+                        endColumn = endCol,
+                        paramName = name
                     )
                 )
             }
@@ -160,12 +168,53 @@ object CallSiteValidator {
                         code = "type-mismatch",
                         line = info.second,
                         startColumn = startCol,
-                        endColumn = passedLineText.length
+                        endColumn = passedLineText.length,
+                        paramName = name,
+                        paramType = decl.type,
+                        passedValue = value
                     )
                 )
             }
         }
 
         return diagnostics
+    }
+
+    /**
+     * Finds the 0-based line index after which a new parameter entry should be inserted
+     * when the "Add missing parameter" quick-fix runs.
+     *
+     * Returns the last line of the existing `parameters:` block, or -1 if no
+     * `parameters:` block exists yet (the fix will create one).
+     */
+    private fun findInsertAfterLine(lines: List<String>, templateLine: Int): Int {
+        val templateRaw = lines[templateLine]
+        val templateIndent = templateRaw.length - templateRaw.trimStart().length
+
+        var paramsLine = -1
+        var lastParamEntryLine = -1
+
+        for (i in (templateLine + 1) until lines.size) {
+            val raw = lines[i]
+            val trimmed = raw.trimEnd()
+            val stripped = trimmed.trimStart()
+            if (stripped.isEmpty()) continue
+
+            val lineIndent = trimmed.length - stripped.length
+            if (lineIndent <= templateIndent) break
+
+            if (paramsLine == -1) {
+                if (Regex("^\\s+parameters\\s*:").containsMatchIn(trimmed)) {
+                    paramsLine = i
+                }
+                continue
+            }
+
+            // Inside the parameters block — track the last non-empty line
+            if (lineIndent <= (lines[paramsLine].length - lines[paramsLine].trimStart().length)) break
+            lastParamEntryLine = i
+        }
+
+        return if (paramsLine == -1) -1 else if (lastParamEntryLine == -1) paramsLine else lastParamEntryLine
     }
 }

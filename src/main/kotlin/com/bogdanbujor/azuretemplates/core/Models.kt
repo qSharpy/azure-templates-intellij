@@ -46,7 +46,20 @@ data class DiagnosticIssue(
     val code: String,
     val line: Int,
     val startColumn: Int,
-    val endColumn: Int
+    val endColumn: Int,
+    // ── Quick-fix context ─────────────────────────────────────────────────────
+    /** For "missing-required-param": the parameter name to insert. */
+    val paramName: String? = null,
+    /** For "missing-required-param": the declared parameter type (e.g. "boolean"). */
+    val paramType: String? = null,
+    /** For "type-mismatch": the value that was actually passed. */
+    val passedValue: String? = null,
+    /**
+     * For "missing-required-param": the 0-based line index of the `parameters:` block
+     * inside the call site where the new entry should be appended.
+     * -1 means the `parameters:` block does not exist yet and must be created.
+     */
+    val insertAfterLine: Int = -1
 )
 
 enum class IssueSeverity { ERROR, WARNING }
