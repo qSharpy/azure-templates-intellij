@@ -68,8 +68,6 @@ stages:
   # ============================================================
   - template: /samples/stages/ci-stage.yml
     parameters:
-      stageName: 'CI_Integration'
-      displayName: 'CI — Integration Tests & Docker Push'
       project: 'src/$(serviceName)/**/*.csproj'
       testProject: 'tests/$(serviceName).UnitTests/**/*.csproj'
       buildConfiguration: $(buildConfiguration)
@@ -77,7 +75,7 @@ stages:
       dockerRepository: '$(dockerRegistry)/$(serviceName)'
       dockerRegistryServiceConnection: 'ACR-ServiceConnection'
       dockerfile: 'src/$(serviceName)/Dockerfile'
-      pushImage: true
+      pushImage: 'true'
       collectCoverage: true
       runIntegrationTests: true
       integrationTestProject: 'tests/$(serviceName).IntegrationTests/**/*.csproj'
