@@ -217,6 +217,27 @@ class DiagnosticsPanel(private val project: Project) {
         }.queue()
     }
 
+    /**
+     * Selects and scrolls to the file node matching [filePath] in the diagnostics tree.
+     * Expands the node so its issue children are visible.
+     * Must be called on the EDT.
+     */
+    fun selectFile(filePath: String) {
+        val rootNode = treeModel.root as? DefaultMutableTreeNode ?: return
+        val children = rootNode.children()
+        while (children.hasMoreElements()) {
+            val child = children.nextElement() as? DefaultMutableTreeNode ?: continue
+            val data = child.userObject as? DiagnosticNodeData ?: continue
+            if (data.filePath == filePath && data.isFile) {
+                val path = javax.swing.tree.TreePath(child.path)
+                tree.selectionPath = path
+                tree.expandPath(path)
+                tree.scrollPathToVisible(path)
+                return
+            }
+        }
+    }
+
     private fun navigateTo(filePath: String, line: Int, column: Int) {
         val virtualFile = LocalFileSystem.getInstance().findFileByPath(filePath) ?: return
         val targetLine = if (line >= 0) line else 0

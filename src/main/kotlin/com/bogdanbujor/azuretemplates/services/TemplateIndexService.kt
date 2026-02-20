@@ -35,6 +35,12 @@ class TemplateIndexService(private val project: Project) {
     private val index = mutableMapOf<String, FileIndex>()
     private val upstreamCache = mutableMapOf<String, List<String>>()
 
+    /**
+     * Worst-severity diagnostic per file path, rebuilt whenever the index changes.
+     * Null means no issues were found for that file.
+     */
+    private val diagnosticsCache = mutableMapOf<String, IssueSeverity>()
+
     /** Listeners notified on the EDT after every index update. */
     private val indexListeners = mutableListOf<() -> Unit>()
 
@@ -53,6 +59,7 @@ class TemplateIndexService(private val project: Project) {
                             reindexFile(event.path)
                         }
                         rebuildUpstreamCache()
+                        rebuildDiagnosticsCache()
                         // Notify UI components (e.g. DiagnosticsPanel) that the index changed.
                         notifyIndexUpdated()
                     }
@@ -87,6 +94,7 @@ class TemplateIndexService(private val project: Project) {
                     indexFile(filePath)
                 }
                 rebuildUpstreamCache()
+                rebuildDiagnosticsCache()
             }
 
             override fun onSuccess() {
@@ -108,6 +116,7 @@ class TemplateIndexService(private val project: Project) {
             indexFile(filePath)
         }
         rebuildUpstreamCache()
+        rebuildDiagnosticsCache()
     }
 
     /**
@@ -166,6 +175,53 @@ class TemplateIndexService(private val project: Project) {
     }
 
     /**
+     * Rebuilds the worst-severity diagnostic per file from the current index.
+     * Uses the same checks as DiagnosticsToolWindow (caller-side + unused params).
+     */
+    private fun rebuildDiagnosticsCache() {
+        diagnosticsCache.clear()
+
+        val commentStripRegex = Regex("(^\\s*#.*|\\s#.*)$")
+        val templateRefRegex = Regex("(?:^|\\s)-?\\s*template\\s*:\\s*(.+)$")
+
+        for ((filePath, fileIndex) in index) {
+            val text = try { File(filePath).readText() } catch (e: Exception) { continue }
+            val rawLines = text.replace("\r\n", "\n").split("\n")
+
+            var worstSeverity: IssueSeverity? = null
+
+            fun record(severity: IssueSeverity) {
+                if (worstSeverity == null || severity == IssueSeverity.ERROR) {
+                    worstSeverity = severity
+                }
+            }
+
+            // Caller-side: validate every template call site
+            if (fileIndex.templateRefs.isNotEmpty()) {
+                for (i in rawLines.indices) {
+                    val stripped = rawLines[i].replace(commentStripRegex, "")
+                    val match = templateRefRegex.find(stripped) ?: continue
+                    val templateRef = match.groupValues[1].trim()
+                    if (templateRef.contains("\${") || templateRef.contains("\$(")) continue
+                    val issues = CallSiteValidator.validate(rawLines, i, templateRef, filePath, fileIndex.repoAliases)
+                    for (issue in issues) record(issue.severity)
+                    if (worstSeverity == IssueSeverity.ERROR) break
+                }
+            }
+
+            // Template-side: unused parameter declarations
+            if (worstSeverity != IssueSeverity.ERROR) {
+                val unusedIssues = UnusedParameterChecker.check(text)
+                if (unusedIssues.isNotEmpty()) record(IssueSeverity.WARNING)
+            }
+
+            if (worstSeverity != null) {
+                diagnosticsCache[filePath] = worstSeverity!!
+            }
+        }
+    }
+
+    /**
      * Invokes all registered index listeners on the EDT.
      */
     private fun notifyIndexUpdated() {
@@ -181,6 +237,13 @@ class TemplateIndexService(private val project: Project) {
      */
     fun getUpstreamCallers(filePath: String): List<String> {
         return upstreamCache[filePath] ?: emptyList()
+    }
+
+    /**
+     * Returns the worst diagnostic severity for the given file, or null if no issues.
+     */
+    fun getFileSeverity(filePath: String): IssueSeverity? {
+        return diagnosticsCache[filePath]
     }
 
     /**
