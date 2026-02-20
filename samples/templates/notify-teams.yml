@@ -4,16 +4,22 @@ parameters:
     default: 'https://teams.webhook.url'
   - name: message
     type: string
-    
+
   - name: title
     type: string
     default: 'Pipeline Notification'
   - name: themeColor
     type: string
     default: '0076D7'
+  # ⚠ 'includeRunLink' is declared but never referenced below — the
+  #   "Unused template parameter declaration" inspection will flag this.
   - name: includeRunLink
     type: boolean
     default: true
+  # ⚠ 'severity' was added during a refactor but the body was never updated.
+  - name: severity
+    type: string
+    default: 'info'
 
 steps:
   - task: PowerShell@2
