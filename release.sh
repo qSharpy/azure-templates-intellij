@@ -78,9 +78,10 @@ echo "  ✓ Built: ${ZIP_PATH}"
 # ── 5. Commit ─────────────────────────────────────────────────────────────────
 echo ""
 echo "▶ Step 5/8 — Committing release files…"
-git add build.gradle.kts CHANGELOG.md src/main/resources/META-INF/plugin.xml
-# Stage any other tracked modified files
-git add -u
+# Use `git add -A` (not `-u`) so that new untracked source files are included.
+# `-u` only stages already-tracked files; new files added as part of the feature
+# would be silently omitted from the release commit.
+git add -A
 git commit -m "chore: release v${NEW_VERSION}"
 echo "  ✓ Committed"
 

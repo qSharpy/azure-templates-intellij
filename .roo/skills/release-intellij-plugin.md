@@ -10,15 +10,29 @@ The entire pipeline runs as **a single shell command** (one approval) via [`rele
 - `PUBLISH_TOKEN` environment variable is set (JetBrains Marketplace token).
   It is already exported in the shell environment for this project.
 - The working tree contains only the changes for this release (feature code, tests, updated `plugin.xml` change-notes).
+- **New source files must not be left untracked.** The script uses `git add -A` so all new files are staged automatically — but verify with `git status` before running so nothing is accidentally omitted.
 - You are on the `main` branch.
 
 ---
 
-## Step 1 — Update `plugin.xml` change-notes manually
+## Step 1 — Update release notes manually (three files)
 
-Before running the script, update the `<change-notes>` block in
+Before running the script, update all three of the following files to describe what changed in this release. The script commits them all automatically.
+
+### 1a. `plugin.xml` change-notes
+Update the `<change-notes>` block in
 [`src/main/resources/META-INF/plugin.xml`](src/main/resources/META-INF/plugin.xml)
-to describe what changed in this release. The script commits this file automatically.
+by prepending a new `<h3>X.Y.Z</h3><ul>…</ul>` section above the previous version.
+
+### 1b. `CHANGELOG.md`
+Prepend a new `## [X.Y.Z] — YYYY-MM-DD` section at the top of
+[`CHANGELOG.md`](CHANGELOG.md) (below the `# Changelog` heading) with `### Added` /
+`### Changed` / `### Fixed` sub-sections as appropriate.
+
+### 1c. `README.md`
+If the release adds new user-visible features or changes existing behaviour, update the
+**Features** section (and any other relevant sections) in [`README.md`](README.md) to
+reflect the new capabilities.
 
 ---
 
@@ -38,7 +52,7 @@ The script does everything in order:
 2. Bumps `version` in `build.gradle.kts`
 3. Prepends a new section to `CHANGELOG.md`
 4. `./gradlew buildPlugin -x buildSearchableOptions` — produces the ZIP
-5. `git add -u && git commit -m "chore: release vX.Y.Z"`
+5. `git add -A && git commit -m "chore: release vX.Y.Z"`
 6. `git tag -a vX.Y.Z`
 7. `git push origin HEAD && git push origin vX.Y.Z`
 8. `./gradlew publishPlugin -x buildSearchableOptions` — publishes to Marketplace

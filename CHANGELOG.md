@@ -2,6 +2,28 @@
 
 All notable changes to **Azure Templates Navigator** are documented here.
 
+## [1.4.0] — 2026-02-20
+
+### Added
+- **Fuzzy search in Dependency Tree** — new search bar at the top of the Dependencies panel lets you find any indexed template by typing; results appear in a popup with filename (bold) and directory path (grey), navigable with Up/Down/Enter/Escape.
+- **Typo-tolerant matching** — the `FuzzySearch` engine combines subsequence scoring, word-boundary bonuses, camel-case bonuses, and Levenshtein-based segment fuzzy matching so queries like `"templete"` still find `"template"`.
+- **Debounced search input** — search fires 150 ms after the last keystroke to avoid redundant work on fast typing.
+- **Configurable graph depth** — the Graph tool window now shows −/+ depth controls in the toolbar; in file-scope mode you can expand or narrow how many upstream/downstream levels are rendered (1–10).
+- **Multi-level BFS in file graph** — `GraphBuilder.buildFileGraph()` now performs a proper breadth-first traversal for both downstream templates and upstream callers up to the configured depth, instead of always stopping at depth 1.
+
+## [1.3.0] — 2026-02-20
+
+### Added
+- **Severity indicators in Dependency Tree** — tree nodes are coloured red/amber and suffixed with ✖/⚠ based on their worst diagnostic severity, so issues are visible without opening the Diagnostics panel.
+- **File header severity badge** — the header label in the Dependency Tree panel shows an error/warning icon and coloured filename for the currently active file.
+- **Hide Warnings toggle** — new toolbar action suppresses amber warning highlights in the tree so only errors are shown in colour.
+- **Open in Diagnostics action** — toolbar button jumps from the Dependency Tree panel directly to the matching file node in the Diagnostics tool window.
+- **Copy Path action** — copies the workspace-relative path of the active file to the clipboard with a brief checkmark icon feedback.
+
+### Changed
+- `TemplateIndexService` now maintains a per-file worst-severity cache (`getFileSeverity()`) rebuilt on every index update, eliminating redundant re-validation in the UI layer.
+- `DiagnosticsToolWindow` exposes a new `selectFile()` API that scrolls and expands the matching file node in the Diagnostics tree.
+
 ## [1.2.0] — 2026-02-20
 
 ### Added
