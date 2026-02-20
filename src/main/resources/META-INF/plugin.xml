@@ -26,6 +26,16 @@
     ]]></description>
 
     <change-notes><![CDATA[
+        <h3>1.1.0</h3>
+        <ul>
+            <li><b>Quick-fix actions</b> — one-click fixes for missing required parameters, unknown parameters, and type mismatches directly in the editor</li>
+            <li><b>Performance improvements</b> — background indexing prevents IDE freezes on large workspaces; VFS-based file reads replace blocking I/O</li>
+            <li><b>Full path toggle</b> — switch between short and full file paths in the Dependency Tree and Graph tool windows</li>
+            <li><b>Graph enhancements</b> — zoom controls, improved force-directed layout, and a legend for node types</li>
+            <li><b>Improved documentation styling</b> — richer hover tooltips with better HTML formatting</li>
+            <li><b>Better template resolution</b> — more robust go-to-declaration for cross-repo and relative template paths</li>
+            <li><b>Robustness fixes</b> — regex constants extracted to companion objects, mutable data class fields eliminated, flexible indent detection in parameter parser</li>
+        </ul>
         <h3>1.0.0</h3>
         <ul>
             <li>Initial release</li>
