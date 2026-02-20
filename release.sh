@@ -62,6 +62,8 @@ if [[ -f CHANGELOG.md ]]; then
 else
   printf "# Changelog\n\n${CHANGELOG_ENTRY}" > CHANGELOG.md
 fi
+# Remove the temp file if awk left it behind on failure
+rm -f CHANGELOG.tmp
 echo "  ✓ CHANGELOG.md updated (edit manually to add bullet points)"
 
 # ── 4. Build plugin ZIP ───────────────────────────────────────────────────────
