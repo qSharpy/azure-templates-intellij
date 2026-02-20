@@ -1,4 +1,4 @@
-# ============================================================
+  # ============================================================
 # LEVEL 2 TEMPLATE — Stage template
 # Called by: samples/pipelines/deep-pipeline.yml
 # Calls:     samples/jobs/build-job.yml  (which in turn calls step templates)

@@ -12,14 +12,21 @@ import com.intellij.openapi.project.Project
 import com.intellij.openapi.vfs.LocalFileSystem
 import com.intellij.openapi.wm.ToolWindow
 import com.intellij.openapi.wm.ToolWindowFactory
+import com.intellij.ui.JBColor
 import com.intellij.ui.content.ContentFactory
 import com.intellij.ui.jcef.JBCefBrowser
 import com.intellij.ui.jcef.JBCefBrowserBase
 import com.intellij.ui.jcef.JBCefJSQuery
+import com.intellij.util.ui.JBUI
 import kotlinx.serialization.json.*
 import org.cef.browser.CefBrowser
 import org.cef.handler.CefLoadHandlerAdapter
+import javax.swing.JButton
+import javax.swing.JLabel
 import javax.swing.JPanel
+import javax.swing.SwingConstants
+import javax.swing.border.CompoundBorder
+import javax.swing.border.MatteBorder
 import java.awt.BorderLayout
 
 /**
@@ -42,7 +49,43 @@ class GraphPanel(private val project: Project) {
     val component: JPanel
     private val browser: JBCefBrowser
     private val jsQuery: JBCefJSQuery
-    private var fileScope: Boolean = false
+    private var fileScope: Boolean = true
+    private var depth: Int = 1
+
+    // Toolbar buttons — kept as fields so we can update their state from JS callbacks
+    private val btnFullPath = JButton("Full Path").apply {
+        toolTipText = "Toggle between filename and full workspace-relative path labels"
+        isFocusable = false
+    }
+    private val btnToggleScope = JButton("File Scope").apply {
+        toolTipText = "Toggle between file scope and full workspace graph"
+        isFocusable = false
+    }
+
+    // Depth controls — only meaningful in file scope mode
+    private val depthLabel = JLabel("1", SwingConstants.CENTER).apply {
+        toolTipText = "Number of upstream/downstream levels shown"
+        preferredSize = java.awt.Dimension(20, preferredSize.height)
+    }
+    private val btnDepthMinus = JButton("−").apply {
+        toolTipText = "Show fewer dependency levels"
+        isFocusable = false
+        preferredSize = java.awt.Dimension(26, preferredSize.height)
+    }
+    private val btnDepthPlus = JButton("+").apply {
+        toolTipText = "Show more dependency levels"
+        isFocusable = false
+        preferredSize = java.awt.Dimension(26, preferredSize.height)
+    }
+    // Container panel for depth controls so we can show/hide as a unit
+    private val depthPanel = JPanel().apply {
+        isOpaque = false
+        layout = java.awt.FlowLayout(java.awt.FlowLayout.CENTER, 2, 0)
+        add(btnDepthMinus)
+        add(depthLabel)
+        add(btnDepthPlus)
+        toolTipText = "Depth: levels of upstream/downstream shown in file scope"
+    }
 
     init {
         browser = JBCefBrowser()
@@ -54,7 +97,69 @@ class GraphPanel(private val project: Project) {
             null
         }
 
+        // ── Toolbar ───────────────────────────────────────────────────────
+        val leftPanel = JPanel().apply {
+            isOpaque = false
+            layout = java.awt.FlowLayout(java.awt.FlowLayout.LEFT, 4, 0)
+            add(JButton("Fit").apply {
+                toolTipText = "Fit graph to view"
+                isFocusable = false
+                addActionListener { browser.cefBrowser.executeJavaScript("fitGraph();", "", 0) }
+            })
+            add(btnFullPath)
+        }
+
+        val centerPanel = JPanel().apply {
+            isOpaque = false
+            layout = java.awt.FlowLayout(java.awt.FlowLayout.CENTER, 4, 0)
+            add(depthPanel)
+        }
+
+        val rightPanel = JPanel().apply {
+            isOpaque = false
+            layout = java.awt.FlowLayout(java.awt.FlowLayout.RIGHT, 4, 0)
+            add(btnToggleScope)
+        }
+
+        val toolbar = JPanel(BorderLayout()).apply {
+            border = CompoundBorder(
+                MatteBorder(0, 0, 1, 0, JBColor.border()),
+                JBUI.Borders.empty(2, 4)
+            )
+            add(leftPanel, BorderLayout.WEST)
+            add(centerPanel, BorderLayout.CENTER)
+            add(rightPanel, BorderLayout.EAST)
+        }
+
+        btnFullPath.addActionListener {
+            browser.cefBrowser.executeJavaScript("toggleFullPath();", "", 0)
+        }
+
+        btnToggleScope.addActionListener {
+            browser.cefBrowser.executeJavaScript("toggleScope();", "", 0)
+        }
+
+        btnDepthMinus.addActionListener {
+            if (depth > 1) {
+                depth--
+                updateDepthControls()
+                loadGraphData()
+            }
+        }
+
+        btnDepthPlus.addActionListener {
+            if (depth < 10) {
+                depth++
+                updateDepthControls()
+                loadGraphData()
+            }
+        }
+
+        // Depth controls are only relevant in file scope mode
+        updateDepthControls()
+
         component = JPanel(BorderLayout())
+        component.add(toolbar, BorderLayout.NORTH)
         component.add(browser.component, BorderLayout.CENTER)
 
         // Inject bridge after page loads
@@ -97,24 +202,21 @@ class GraphPanel(private val project: Project) {
                     .node circle { stroke: #fff; stroke-width: 1.5px; cursor: pointer; }
                     .node text { font-size: 10px; fill: #ccc; pointer-events: none; }
                     .link-label { font-size: 8px; fill: #888; }
-                    #controls { position: absolute; top: 10px; right: 10px; z-index: 10; display: flex; gap: 4px; }
-                    #controls button { padding: 4px 8px; background: #333; color: #ccc; border: 1px solid #555; cursor: pointer; border-radius: 3px; font-size: 12px; }
-                    #controls button:hover { background: #444; }
-                    #controls button.active { background: #0d6efd; color: #fff; border-color: #0d6efd; }
-                    #search { position: absolute; top: 10px; left: 10px; z-index: 10; }
-                    #search input { padding: 4px 8px; background: #333; color: #ccc; border: 1px solid #555; border-radius: 3px; }
                     .node.pipeline circle { fill: #4CAF50; }
                     .node.local circle { fill: #2196F3; }
                     .node.external circle { fill: #FF9800; }
                     .node.missing circle { fill: #f44336; }
                     .node.unknown circle { fill: #9E9E9E; }
                     .node.scope circle { stroke: #FFD700; stroke-width: 3px; }
-                    #legend { position: absolute; bottom: 10px; left: 10px; z-index: 10; }
+                    #zoom-controls { position: absolute; top: 10px; right: 10px; z-index: 10; display: flex; gap: 4px; }
+                    #zoom-controls button { padding: 4px 8px; background: #333; color: #ccc; border: 1px solid #555; cursor: pointer; border-radius: 3px; font-size: 12px; }
+                    #zoom-controls button:hover { background: #444; }
+                    #legend { position: absolute; bottom: 10px; right: 10px; z-index: 10; }
                     #legend-toggle { padding: 4px 10px; background: #333; color: #ccc; border: 1px solid #555; cursor: pointer; border-radius: 4px; font-size: 12px; display: flex; align-items: center; gap: 4px; }
                     #legend-toggle:hover { background: #444; }
                     #legend-toggle .arrow { font-size: 9px; transition: transform 0.2s; }
                     #legend-toggle.open .arrow { transform: rotate(90deg); }
-                    #legend-content { display: none; background: rgba(30,30,30,0.95); border: 1px solid #555; border-radius: 4px; padding: 8px 12px; margin-top: 4px; font-size: 11px; }
+                    #legend-content { display: none; background: rgba(30,30,30,0.95); border: 1px solid #555; border-radius: 4px; padding: 8px 12px; margin-bottom: 4px; font-size: 11px; position: absolute; bottom: 100%; right: 0; white-space: nowrap; }
                     #legend-content.open { display: block; }
                     #legend-content div { margin: 2px 0; display: flex; align-items: center; gap: 6px; }
                     #legend .swatch { width: 10px; height: 10px; border-radius: 50%; display: inline-block; }
@@ -122,14 +224,9 @@ class GraphPanel(private val project: Project) {
                 </style>
             </head>
             <body>
-                <div id="search"><input type="text" id="searchInput" placeholder="Search nodes..." /></div>
-                <div id="controls">
+                <div id="zoom-controls">
                     <button onclick="zoomIn()" title="Zoom In">+</button>
                     <button onclick="zoomOut()" title="Zoom Out">−</button>
-                    <button onclick="fitGraph()">Fit</button>
-                    <button onclick="resetGraph()">Reset</button>
-                    <button onclick="toggleScope()">Toggle Scope</button>
-                    <button id="btnFullPath" onclick="toggleFullPath()" title="Toggle between filename and full workspace-relative path labels">Full Path</button>
                 </div>
                 <div id="legend">
                     <button id="legend-toggle" onclick="document.getElementById('legend-toggle').classList.toggle('open'); document.getElementById('legend-content').classList.toggle('open');">
@@ -175,7 +272,7 @@ class GraphPanel(private val project: Project) {
                     let simulation;
                     let svg, g, link, node, linkLabel;
                     let zoom;
-                    let fileScopeMode = false;
+                    let fileScopeMode = true;
                     let showFullPath = false;
                     
                     // Track drag distance to distinguish click from drag
@@ -222,20 +319,8 @@ class GraphPanel(private val project: Project) {
                     /**
                      * Updates the visual state of the full-path button.
                      */
-                    function updateFullPathButton() {
-                        var btn = document.getElementById('btnFullPath');
-                        if (showFullPath) {
-                            btn.classList.add('active');
-                            btn.title = 'Showing full workspace-relative paths — click to show filenames only';
-                        } else {
-                            btn.classList.remove('active');
-                            btn.title = 'Toggle between filename and full workspace-relative path labels';
-                        }
-                    }
-                    
                     function toggleFullPath() {
                         showFullPath = !showFullPath;
-                        updateFullPathButton();
                         updateNodeLabels();
                     }
                     
@@ -285,16 +370,6 @@ class GraphPanel(private val project: Project) {
                             .force('charge', d3.forceManyBody().strength(-300))
                             .force('center', d3.forceCenter(width / 2, height / 2))
                             .force('collision', d3.forceCollide().radius(30));
-                        
-                        // Search
-                        d3.select('#searchInput').on('input', function() {
-                            const query = this.value.toLowerCase();
-                            node.style('opacity', d => {
-                                if (!query) return 1;
-                                return ((d.label || '').toLowerCase().includes(query) ||
-                                        (d.relativePath || '').toLowerCase().includes(query)) ? 1 : 0.2;
-                            });
-                        });
                         
                         window.addEventListener('resize', () => {
                             simulation.force('center', d3.forceCenter(window.innerWidth / 2, window.innerHeight / 2));
@@ -351,6 +426,10 @@ class GraphPanel(private val project: Project) {
                         simulation.nodes(nodes).on('tick', ticked);
                         simulation.force('link').links(edges);
                         simulation.alpha(1).restart();
+                        // Fit after the simulation has had time to spread nodes out.
+                        // We use a timeout because JBCef may throttle rAF when the panel
+                        // is not focused, causing the 'end' event to never fire reliably.
+                        setTimeout(fitGraph, 800);
                     }
                     
                     function ticked() {
@@ -402,11 +481,6 @@ class GraphPanel(private val project: Project) {
                         svg.transition().duration(500).call(zoom.transform, d3.zoomIdentity.translate(tx, ty).scale(scale));
                     }
                     
-                    function resetGraph() {
-                        svg.transition().duration(500).call(zoom.transform, d3.zoomIdentity);
-                        simulation.alpha(1).restart();
-                    }
-                    
                     function toggleScope() {
                         fileScopeMode = !fileScopeMode;
                         bridge.postMessage({ type: 'toggleScope', fileScope: fileScopeMode });
@@ -426,6 +500,13 @@ class GraphPanel(private val project: Project) {
         browser.cefBrowser.executeJavaScript(js, "", 0)
     }
 
+    private fun updateDepthControls() {
+        depthLabel.text = depth.toString()
+        btnDepthMinus.isEnabled = depth > 1
+        btnDepthPlus.isEnabled = depth < 10
+        depthPanel.isVisible = fileScope
+    }
+
     private fun loadGraphData() {
         val basePath = project.basePath ?: return
         val settings = PluginSettings.getInstance()
@@ -434,7 +515,7 @@ class GraphPanel(private val project: Project) {
         val graphData: GraphData = if (fileScope) {
             val currentFile = FileEditorManager.getInstance(project).selectedFiles.firstOrNull()
             if (currentFile != null) {
-                GraphBuilder.buildFileGraph(currentFile.path, basePath)
+                GraphBuilder.buildFileGraph(currentFile.path, basePath, depth)
             } else {
                 GraphBuilder.buildWorkspaceGraph(basePath, subPath)
             }
@@ -471,6 +552,10 @@ class GraphPanel(private val project: Project) {
                 }
                 "toggleScope" -> {
                     fileScope = json["fileScope"]?.jsonPrimitive?.boolean ?: false
+                    ApplicationManager.getApplication().invokeLater {
+                        btnToggleScope.text = if (fileScope) "File Scope" else "Workspace"
+                        updateDepthControls()
+                    }
                     loadGraphData()
                 }
             }

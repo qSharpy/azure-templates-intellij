@@ -16,27 +16,27 @@ import com.intellij.openapi.wm.ToolWindowFactory
 import com.intellij.ui.ColoredTreeCellRenderer
 import com.intellij.ui.SimpleTextAttributes
 import com.intellij.ui.components.JBScrollPane
+import com.intellij.ui.components.JBTextField
 import com.intellij.ui.content.ContentFactory
 import com.intellij.ui.treeStructure.Tree
 import com.intellij.openapi.wm.ToolWindowManager
 import com.intellij.ui.JBColor
 import com.intellij.util.ui.JBUI
 import java.awt.BorderLayout
+import java.awt.Component
+import java.awt.Dimension
 import java.awt.Font
 import java.awt.Toolkit
 import java.awt.datatransfer.StringSelection
-import java.awt.event.MouseAdapter
-import java.awt.event.MouseEvent
+import java.awt.event.*
 import java.util.Timer
 import java.util.TimerTask
 import java.io.File
-import javax.swing.Icon
-import javax.swing.JLabel
-import javax.swing.JPanel
-import javax.swing.JTree
-import javax.swing.SwingConstants
+import javax.swing.*
 import javax.swing.border.CompoundBorder
 import javax.swing.border.MatteBorder
+import javax.swing.event.DocumentEvent
+import javax.swing.event.DocumentListener
 import javax.swing.tree.DefaultMutableTreeNode
 import javax.swing.tree.DefaultTreeModel
 
@@ -80,6 +80,31 @@ class DependencyTreePanel(private val project: Project) {
         border = JBUI.Borders.empty(0, 2, 0, 8)
     }
 
+    // ── Search bar components ──────────────────────────────────────────
+    private val searchField = JBTextField().apply {
+        emptyText.text = "Search templates…"
+        border = CompoundBorder(
+            MatteBorder(0, 0, 1, 0, JBColor.border()),
+            JBUI.Borders.empty(4, 6)
+        )
+    }
+
+    /** List model backing the search results popup. */
+    private val searchResultsModel = DefaultListModel<FuzzySearch.SearchResult>()
+
+    /** The popup list showing search results beneath the search field. */
+    private val searchResultsList = JList(searchResultsModel).apply {
+        selectionMode = ListSelectionModel.SINGLE_SELECTION
+        cellRenderer = SearchResultCellRenderer()
+        fixedCellHeight = 28
+    }
+
+    /** Popup window that hosts the search results list. */
+    private var searchPopup: JWindow? = null
+
+    /** Debounce timer for search input. */
+    private var searchDebounceTimer: Timer? = null
+
     val component: JPanel
 
     init {
@@ -89,14 +114,94 @@ class DependencyTreePanel(private val project: Project) {
             hideWarningsProvider = { hideWarnings }
         )
 
-        // Double-click to open file
+        // Double-click to open file; right-click for context menu
         tree.addMouseListener(object : MouseAdapter() {
             override fun mouseClicked(e: MouseEvent) {
-                if (e.clickCount == 2) {
+                if (e.clickCount == 2 && !SwingUtilities.isRightMouseButton(e)) {
                     val node = tree.lastSelectedPathComponent as? DefaultMutableTreeNode ?: return
                     val data = node.userObject as? TreeNodeData ?: return
                     val filePath = data.filePath ?: return
                     openFile(filePath)
+                }
+            }
+
+            override fun mousePressed(e: MouseEvent) {
+                if (SwingUtilities.isRightMouseButton(e)) {
+                    // Select the node under the cursor before showing the menu
+                    val path = tree.getPathForLocation(e.x, e.y)
+                    if (path != null) tree.selectionPath = path
+                    showTreeContextMenu(e)
+                }
+            }
+        })
+
+        // ── Wire up search ─────────────────────────────────────────────
+        searchField.document.addDocumentListener(object : DocumentListener {
+            override fun insertUpdate(e: DocumentEvent) = onSearchChanged()
+            override fun removeUpdate(e: DocumentEvent) = onSearchChanged()
+            override fun changedUpdate(e: DocumentEvent) = onSearchChanged()
+        })
+
+        // Keyboard handling for the search field
+        searchField.addKeyListener(object : KeyAdapter() {
+            override fun keyPressed(e: KeyEvent) {
+                when (e.keyCode) {
+                    KeyEvent.VK_ENTER -> {
+                        e.consume()
+                        selectTopSearchResult()
+                    }
+                    KeyEvent.VK_DOWN -> {
+                        e.consume()
+                        moveSearchSelection(1)
+                    }
+                    KeyEvent.VK_UP -> {
+                        e.consume()
+                        moveSearchSelection(-1)
+                    }
+                    KeyEvent.VK_ESCAPE -> {
+                        e.consume()
+                        hideSearchPopup()
+                        searchField.text = ""
+                    }
+                }
+            }
+        })
+
+        // Hide popup when search field loses focus, but only if focus didn't go to the popup
+        searchField.addFocusListener(object : FocusAdapter() {
+            override fun focusLost(e: FocusEvent) {
+                // Check if focus went to the popup or its children — if so, keep it open
+                val opposite = e.oppositeComponent
+                if (opposite != null) {
+                    val popupWindow = searchPopup
+                    if (popupWindow != null && (opposite === searchResultsList ||
+                            SwingUtilities.isDescendingFrom(opposite, popupWindow))) {
+                        // Focus went to the popup — keep it visible and return focus to search
+                        SwingUtilities.invokeLater { searchField.requestFocusInWindow() }
+                        return
+                    }
+                }
+                // Focus truly left the search area — hide after a short delay for click processing
+                Timer().schedule(object : TimerTask() {
+                    override fun run() {
+                        SwingUtilities.invokeLater {
+                            // Double-check: if search field regained focus, don't hide
+                            if (!searchField.hasFocus()) {
+                                hideSearchPopup()
+                            }
+                        }
+                    }
+                }, 250)
+            }
+        })
+
+        // Click on a search result opens the file
+        searchResultsList.addMouseListener(object : MouseAdapter() {
+            override fun mouseClicked(e: MouseEvent) {
+                val idx = searchResultsList.locationToIndex(e.point)
+                if (idx >= 0) {
+                    val result = searchResultsModel.getElementAt(idx)
+                    openFileFromSearch(result.filePath)
                 }
             }
         })
@@ -128,7 +233,13 @@ class DependencyTreePanel(private val project: Project) {
             add(toolbar.component, BorderLayout.EAST)
         }
 
-        mainPanel.add(fileHeaderPanel, BorderLayout.NORTH)
+        // Top section: search bar on top, then file header below it
+        val topPanel = JPanel(BorderLayout()).apply {
+            add(searchField, BorderLayout.NORTH)
+            add(fileHeaderPanel, BorderLayout.CENTER)
+        }
+
+        mainPanel.add(topPanel, BorderLayout.NORTH)
         mainPanel.add(JBScrollPane(tree), BorderLayout.CENTER)
 
         component = mainPanel
@@ -151,6 +262,132 @@ class DependencyTreePanel(private val project: Project) {
         if (currentFile != null && (currentFile.extension == "yml" || currentFile.extension == "yaml")) {
             refresh(currentFile)
         }
+    }
+
+    // ── Search logic ───────────────────────────────────────────────────
+
+    /**
+     * Called on every keystroke in the search field (debounced).
+     * Queries the index via [FuzzySearch] and shows/hides the popup.
+     */
+    private fun onSearchChanged() {
+        searchDebounceTimer?.cancel()
+        searchDebounceTimer = Timer().also { timer ->
+            timer.schedule(object : TimerTask() {
+                override fun run() {
+                    SwingUtilities.invokeLater { performSearch() }
+                }
+            }, 150) // 150ms debounce
+        }
+    }
+
+    private fun performSearch() {
+        val query = searchField.text.trim()
+        if (query.isEmpty()) {
+            hideSearchPopup()
+            return
+        }
+
+        val basePath = project.basePath ?: return
+        val indexService = TemplateIndexService.getInstance(project)
+        val allFiles = indexService.getAllFiles()
+
+        // Build candidates: absolute path → workspace-relative path
+        val candidates = mutableMapOf<String, String>()
+        for (absPath in allFiles) {
+            val relPath = try {
+                File(absPath).relativeTo(File(basePath)).path.replace("\\", "/")
+            } catch (e: Exception) {
+                File(absPath).name
+            }
+            candidates[absPath] = relPath
+        }
+
+        val results = FuzzySearch.search(query, candidates, maxResults = 15)
+
+        searchResultsModel.clear()
+        for (result in results) {
+            searchResultsModel.addElement(result)
+        }
+
+        if (results.isNotEmpty()) {
+            showSearchPopup()
+            searchResultsList.selectedIndex = 0
+        } else {
+            hideSearchPopup()
+        }
+    }
+
+    private fun showSearchPopup() {
+        if (searchPopup?.isVisible == true) {
+            // Just update the size
+            updatePopupBounds()
+            searchPopup?.revalidate()
+            searchPopup?.repaint()
+            return
+        }
+
+        val window = SwingUtilities.getWindowAncestor(searchField) ?: return
+        val popup = JWindow(window)
+        popup.type = java.awt.Window.Type.POPUP
+        popup.focusableWindowState = false  // prevent the popup from stealing focus
+
+        val scrollPane = JBScrollPane(searchResultsList).apply {
+            border = MatteBorder(0, 1, 1, 1, JBColor.border())
+            isFocusable = false
+        }
+        searchResultsList.isFocusable = false  // list itself should not grab focus
+        popup.contentPane.add(scrollPane)
+
+        searchPopup = popup
+        updatePopupBounds()
+        popup.isVisible = true
+    }
+
+    private fun updatePopupBounds() {
+        val popup = searchPopup ?: return
+        val locationOnScreen = try {
+            searchField.locationOnScreen
+        } catch (e: Exception) {
+            return
+        }
+        val x = locationOnScreen.x
+        val y = locationOnScreen.y + searchField.height
+        val width = searchField.width
+        val itemCount = searchResultsModel.size().coerceAtMost(10)
+        val height = (itemCount * searchResultsList.fixedCellHeight).coerceAtLeast(28) + 4
+        popup.setBounds(x, y, width, height)
+    }
+
+    private fun hideSearchPopup() {
+        searchPopup?.isVisible = false
+        searchPopup?.dispose()
+        searchPopup = null
+    }
+
+    private fun selectTopSearchResult() {
+        val idx = searchResultsList.selectedIndex
+        if (idx >= 0 && idx < searchResultsModel.size()) {
+            val result = searchResultsModel.getElementAt(idx)
+            openFileFromSearch(result.filePath)
+        }
+    }
+
+    private fun moveSearchSelection(delta: Int) {
+        if (searchResultsModel.isEmpty) return
+        val newIdx = (searchResultsList.selectedIndex + delta)
+            .coerceIn(0, searchResultsModel.size() - 1)
+        searchResultsList.selectedIndex = newIdx
+        searchResultsList.ensureIndexIsVisible(newIdx)
+    }
+
+    /**
+     * Opens a file from a search result, clears the search, and refreshes the tree.
+     */
+    private fun openFileFromSearch(filePath: String) {
+        hideSearchPopup()
+        searchField.text = ""
+        openFile(filePath)
     }
 
     fun refresh(file: VirtualFile? = null) {
@@ -409,6 +646,35 @@ class DependencyTreePanel(private val project: Project) {
     }
 
     /**
+     * Shows a right-click context menu for the tree node under the cursor.
+     * "Open in Diagnostics" is only enabled when the node's file has at least one issue.
+     */
+    private fun showTreeContextMenu(e: MouseEvent) {
+        val node = tree.lastSelectedPathComponent as? DefaultMutableTreeNode ?: return
+        val data = node.userObject as? TreeNodeData ?: return
+        val filePath = data.filePath ?: return  // group nodes have no filePath — skip
+
+        val indexService = TemplateIndexService.getInstance(project)
+        val hasDiagnostics = indexService.getFileSeverity(filePath) != null
+
+        val menu = JPopupMenu()
+        val diagItem = JMenuItem("Open in Diagnostics", AllIcons.General.InspectionsEye).apply {
+            isEnabled = hasDiagnostics
+            addActionListener {
+                val twManager = ToolWindowManager.getInstance(project)
+                val tw = twManager.getToolWindow("Azure Templates - Diagnostics") ?: return@addActionListener
+                tw.activate {
+                    val content = tw.contentManager.getContent(0) ?: return@activate
+                    val panel = content.getUserData(DiagnosticsToolWindow.PANEL_KEY) ?: return@activate
+                    panel.selectFile(filePath)
+                }
+            }
+        }
+        menu.add(diagItem)
+        menu.show(tree, e.x, e.y)
+    }
+
+    /**
      * Updates the header label text to either the filename or the workspace-relative path,
      * depending on the current [showFullPath] state.
      */
@@ -602,10 +868,56 @@ class TemplateTreeCellRenderer(
         if (data.description != null) {
             append("  ${data.description}", SimpleTextAttributes.GRAYED_ATTRIBUTES)
         }
-        when (effectiveSeverity) {
-            IssueSeverity.ERROR -> append("  ✖", SimpleTextAttributes.ERROR_ATTRIBUTES)
-            IssueSeverity.WARNING -> append("  ⚠", SimpleTextAttributes(SimpleTextAttributes.STYLE_PLAIN, java.awt.Color(0xE6, 0xA0, 0x00)))
-            null -> {}
-        }
     }
+}
+
+/**
+ * Cell renderer for the fuzzy search results popup list.
+ * Shows the file icon, filename (bold), and the full relative path (grey) beneath.
+ */
+class SearchResultCellRenderer : ListCellRenderer<FuzzySearch.SearchResult> {
+    override fun getListCellRendererComponent(
+        list: JList<out FuzzySearch.SearchResult>,
+        value: FuzzySearch.SearchResult?,
+        index: Int,
+        isSelected: Boolean,
+        cellHasFocus: Boolean
+    ): Component {
+        val panel = JPanel(BorderLayout()).apply {
+            border = JBUI.Borders.empty(2, 6)
+            isOpaque = true
+            background = if (isSelected) {
+                list.selectionBackground
+            } else {
+                list.background
+            }
+        }
+
+        if (value == null) return panel
+
+        val fileName = File(value.relativePath).name
+        val dirPath = File(value.relativePath).parent?.replace("\\", "/") ?: ""
+
+        val label = JLabel().apply {
+            icon = AllIcons.FileTypes.Yaml
+            text = buildString {
+                append("<html><b>")
+                append(escapeHtml(fileName))
+                append("</b>")
+                if (dirPath.isNotEmpty()) {
+                    append("  <font color='#888888'>")
+                    append(escapeHtml(dirPath))
+                    append("</font>")
+                }
+                append("</html>")
+            }
+            foreground = if (isSelected) list.selectionForeground else list.foreground
+        }
+
+        panel.add(label, BorderLayout.CENTER)
+        return panel
+    }
+
+    private fun escapeHtml(s: String): String =
+        s.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
 }

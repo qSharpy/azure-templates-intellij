@@ -220,14 +220,15 @@ object GraphBuilder {
 
     /**
      * Builds a scoped graph for a single file: the file itself as the root node,
-     * plus all templates it directly references (downstream, depth = 1) AND all
-     * workspace files that reference it (upstream callers, depth = 1).
+     * plus all templates it references (downstream, up to [depth] levels) AND all
+     * workspace files that reference it (upstream callers, up to [depth] levels).
      *
      * @param filePath Absolute path to the pipeline / template file
      * @param workspaceRoot Absolute path to the workspace root
+     * @param depth How many levels of upstream/downstream to include (default = 1)
      * @return [GraphData] with nodes and edges
      */
-    fun buildFileGraph(filePath: String, workspaceRoot: String): GraphData {
+    fun buildFileGraph(filePath: String, workspaceRoot: String, depth: Int = 1): GraphData {
         val nodeMap = mutableMapOf<String, GraphNode>()
         val edges = mutableListOf<GraphEdge>()
         val edgeKeys = mutableSetOf<String>()
@@ -253,61 +254,87 @@ object GraphBuilder {
             isScope = true
         )
 
-        // ── Downstream: direct children (templates called by this file) ─────
-        val repoAliases = RepositoryAliasParser.parse(rootText)
-        val refs = extractTemplateRefs(filePath)
+        // ── Downstream: BFS up to [depth] levels ────────────────────────────
+        // frontier holds (filePath, currentDepth) pairs
+        var downstreamFrontier = listOf(filePath)
+        for (currentDepth in 1..depth) {
+            val nextFrontier = mutableListOf<String>()
+            for (sourceFile in downstreamFrontier) {
+                val sourceText = try { File(sourceFile).readText() } catch (e: Exception) { continue }
+                val repoAliases = RepositoryAliasParser.parse(sourceText)
+                val refs = extractTemplateRefs(sourceFile)
 
-        for ((templateRef, _) in refs) {
-            if (templateRef.contains("\${") || templateRef.contains("\$(")) continue
-            val resolved = TemplateResolver.resolve(templateRef, filePath, repoAliases) ?: continue
-            addResolvedRef(filePath, templateRef, resolved, nodeMap, edges, edgeKeys, "downstream", workspaceRoot)
+                for ((templateRef, _) in refs) {
+                    if (templateRef.contains("\${") || templateRef.contains("\$(")) continue
+                    val resolved = TemplateResolver.resolve(templateRef, sourceFile, repoAliases) ?: continue
+                    val targetId = addResolvedRef(
+                        sourceFile, templateRef, resolved, nodeMap, edges, edgeKeys, "downstream", workspaceRoot
+                    )
+                    // Only continue BFS into real files (not missing/unknown synthetic nodes)
+                    if (targetId != null && !targetId.startsWith("MISSING:") && !targetId.startsWith("UNKNOWN_ALIAS:")) {
+                        if (currentDepth < depth) nextFrontier.add(targetId)
+                    }
+                }
+            }
+            downstreamFrontier = nextFrontier
         }
 
-        // ── Upstream: find all workspace YAML files that reference this file ─
+        // ── Upstream: BFS up to [depth] levels ──────────────────────────────
+        // Build a reverse-lookup map: filePath → list of callers (lazy, built once)
         val allYaml = collectYamlFiles(File(workspaceRoot))
+        // callerMap: target filePath → list of (callerFile, edgeLabel)
+        val callerMap = mutableMapOf<String, MutableList<Pair<String, String?>>>()
         for (callerFile in allYaml) {
-            if (callerFile == filePath) continue
-
             val callerText = try { File(callerFile).readText() } catch (e: Exception) { continue }
             val callerAliases = RepositoryAliasParser.parse(callerText)
             val callerRefs = extractTemplateRefs(callerFile)
-
             for ((templateRef, _) in callerRefs) {
                 if (templateRef.contains("\${") || templateRef.contains("\$(")) continue
                 val resolved = TemplateResolver.resolve(templateRef, callerFile, callerAliases) ?: continue
+                val resolvedPath = resolved.filePath ?: continue
+                val edgeLabel = if (resolved.alias != null && resolved.alias != "self") "@${resolved.alias}" else null
+                callerMap.getOrPut(resolvedPath) { mutableListOf() }.add(callerFile to edgeLabel)
+            }
+        }
 
-                // Only care about refs that resolve to our focal file
-                if (resolved.filePath != filePath) continue
-
-                // Ensure the caller node exists
-                if (callerFile !in nodeMap) {
-                    val callerKind = if (isPipelineRoot(callerText)) NodeKind.PIPELINE else NodeKind.LOCAL
-                    val callerParams = ParameterParser.parse(callerText)
-                    val callerRelPath = try {
-                        File(callerFile).relativeTo(File(workspaceRoot)).path.replace("\\", "/")
-                    } catch (e: Exception) {
-                        File(callerFile).name
+        var upstreamFrontier = listOf(filePath)
+        for (currentDepth in 1..depth) {
+            val nextFrontier = mutableListOf<String>()
+            for (targetFile in upstreamFrontier) {
+                val callers = callerMap[targetFile] ?: continue
+                for ((callerFile, edgeLabel) in callers) {
+                    // Ensure the caller node exists
+                    if (callerFile !in nodeMap) {
+                        val callerText = try { File(callerFile).readText() } catch (e: Exception) { continue }
+                        val callerKind = if (isPipelineRoot(callerText)) NodeKind.PIPELINE else NodeKind.LOCAL
+                        val callerParams = ParameterParser.parse(callerText)
+                        val callerRelPath = try {
+                            File(callerFile).relativeTo(File(workspaceRoot)).path.replace("\\", "/")
+                        } catch (e: Exception) {
+                            File(callerFile).name
+                        }
+                        nodeMap[callerFile] = GraphNode(
+                            id = callerFile,
+                            label = File(callerFile).name,
+                            relativePath = callerRelPath,
+                            kind = callerKind,
+                            filePath = callerFile,
+                            paramCount = callerParams.size,
+                            requiredCount = callerParams.count { it.required }
+                        )
                     }
 
-                    nodeMap[callerFile] = GraphNode(
-                        id = callerFile,
-                        label = File(callerFile).name,
-                        relativePath = callerRelPath,
-                        kind = callerKind,
-                        filePath = callerFile,
-                        paramCount = callerParams.size,
-                        requiredCount = callerParams.count { it.required }
-                    )
-                }
+                    // Add upstream edge: caller → target
+                    val edgeKey = "$callerFile→$targetFile"
+                    if (edgeKey !in edgeKeys) {
+                        edgeKeys.add(edgeKey)
+                        edges.add(GraphEdge(source = callerFile, target = targetFile, label = edgeLabel, direction = "upstream"))
+                    }
 
-                // Add upstream edge: caller → focal file
-                val edgeKey = "$callerFile→$filePath"
-                if (edgeKey !in edgeKeys) {
-                    edgeKeys.add(edgeKey)
-                    val edgeLabel = if (resolved.alias != null && resolved.alias != "self") "@${resolved.alias}" else null
-                    edges.add(GraphEdge(source = callerFile, target = filePath, label = edgeLabel, direction = "upstream"))
+                    if (currentDepth < depth) nextFrontier.add(callerFile)
                 }
             }
+            upstreamFrontier = nextFrontier
         }
 
         return GraphData(
@@ -316,6 +343,11 @@ object GraphBuilder {
         )
     }
 
+    /**
+     * Resolves a single template reference and adds the corresponding node + edge to the
+     * mutable collections.  Returns the resolved [targetId] so callers can continue BFS,
+     * or `null` if the reference could not be resolved.
+     */
     private fun addResolvedRef(
         sourceId: String,
         templateRef: String,
@@ -325,7 +357,7 @@ object GraphBuilder {
         edgeKeys: MutableSet<String>,
         direction: String,
         workspaceRoot: String
-    ) {
+    ): String? {
         var targetId: String
         var edgeLabel: String? = null
 
@@ -343,7 +375,7 @@ object GraphBuilder {
             }
             edgeLabel = "@${resolved.alias}"
         } else {
-            val resolvedPath = resolved.filePath ?: return
+            val resolvedPath = resolved.filePath ?: return null
             val repoName = resolved.repoName
             val alias = resolved.alias
 
@@ -413,5 +445,7 @@ object GraphBuilder {
             edgeKeys.add(edgeKey)
             edges.add(GraphEdge(source = edgeSrc, target = edgeTgt, label = edgeLabel, direction = direction))
         }
+
+        return targetId
     }
 }
