@@ -26,6 +26,12 @@
     ]]></description>
 
     <change-notes><![CDATA[
+        <h3>1.2.0</h3>
+        <ul>
+            <li><b>Unused Parameter diagnostic</b> — new template-side inspection detects parameters declared in <code>parameters:</code> that are never referenced via <code>${{ parameters.name }}</code> in the template body; reported as a Warning with a one-click "Remove unused parameter declaration" quick-fix</li>
+            <li><b>Diagnostics panel integration</b> — the Diagnostics tool window now surfaces unused-parameter warnings project-wide alongside caller-side errors, so dead parameters are visible without opening each file</li>
+            <li><b>Precise highlight range</b> — the unused-parameter squiggly now covers only the parameter name token, not the leading whitespace on the declaration line</li>
+        </ul>
         <h3>1.1.0</h3>
         <ul>
             <li><b>Quick-fix actions</b> — one-click fixes for missing required parameters, unknown parameters, and type mismatches directly in the editor</li>
@@ -68,13 +74,22 @@
         <completion.contributor language="yaml"
             implementationClass="com.bogdanbujor.azuretemplates.providers.TemplateCompletionContributor"/>
 
-        <!-- Inspection (diagnostics) -->
+        <!-- Inspection: caller-side parameter validation -->
         <localInspection language="yaml"
             groupName="Azure Templates Navigator"
             displayName="Template parameter validation"
             enabledByDefault="true"
             level="ERROR"
             implementationClass="com.bogdanbujor.azuretemplates.providers.TemplateInspection"/>
+
+        <!-- Inspection: template-side unused parameter detection -->
+        <localInspection language="yaml"
+            groupName="Azure Templates Navigator"
+            displayName="Unused template parameter declaration"
+            shortName="AzureTemplatesUnusedParameter"
+            enabledByDefault="true"
+            level="WARNING"
+            implementationClass="com.bogdanbujor.azuretemplates.providers.UnusedParameterInspection"/>
 
         <!-- Line markers (gutter icons) -->
         <codeInsight.lineMarkerProvider language="yaml"

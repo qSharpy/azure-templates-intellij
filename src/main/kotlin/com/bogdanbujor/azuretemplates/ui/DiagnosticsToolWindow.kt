@@ -25,6 +25,13 @@ import javax.swing.tree.DefaultTreeModel
 /**
  * Tool window showing all template diagnostics grouped by file.
  *
+ * Two categories of issues are surfaced:
+ * 1. **Caller-side** — missing required params, unknown params, type mismatches
+ *    (detected by [CallSiteValidator] for every file that references a template).
+ * 2. **Template-side** — unused parameter declarations
+ *    (detected by [UnusedParameterChecker] for every YAML file that has a
+ *    `parameters:` block, regardless of whether it also calls other templates).
+ *
  * Port of diagnosticsPanelProvider.js from the VS Code extension.
  */
 class DiagnosticsToolWindow : ToolWindowFactory, DumbAware {
@@ -111,21 +118,44 @@ class DiagnosticsPanel(private val project: Project) {
                     indicator.text2 = File(filePath).name
 
                     val fileIndex = indexService.getFileIndex(filePath) ?: return@forEachIndexed
-                    if (fileIndex.templateRefs.isEmpty()) return@forEachIndexed
 
-                    // Re-read lines from disk for CallSiteValidator.
+                    // Re-read the file once; used for both caller-side and template-side checks.
                     val text = try { File(filePath).readText() } catch (e: Exception) { return@forEachIndexed }
                     val rawLines = text.replace("\r\n", "\n").split("\n")
 
                     val fileIssues = mutableListOf<DiagnosticIssue>()
 
-                    for (i in rawLines.indices) {
-                        val stripped = rawLines[i].replace(COMMENT_STRIP_REGEX, "")
-                        val match = TEMPLATE_REF_REGEX.find(stripped) ?: continue
-                        val templateRef = match.groupValues[1].trim()
-                        if (templateRef.contains("\${") || templateRef.contains("\$(")) continue
-                        val issues = CallSiteValidator.validate(rawLines, i, templateRef, filePath, fileIndex.repoAliases)
-                        fileIssues.addAll(issues)
+                    // ── Caller-side: validate every template call site ────────────────
+                    if (fileIndex.templateRefs.isNotEmpty()) {
+                        for (i in rawLines.indices) {
+                            val stripped = rawLines[i].replace(COMMENT_STRIP_REGEX, "")
+                            val match = TEMPLATE_REF_REGEX.find(stripped) ?: continue
+                            val templateRef = match.groupValues[1].trim()
+                            if (templateRef.contains("\${") || templateRef.contains("\$(")) continue
+                            val issues = CallSiteValidator.validate(rawLines, i, templateRef, filePath, fileIndex.repoAliases)
+                            fileIssues.addAll(issues)
+                        }
+                    }
+
+                    // ── Template-side: detect unused parameter declarations ───────────
+                    // Run on every YAML file that declares a parameters: block, not just
+                    // those that also call other templates.
+                    val unusedIssues = UnusedParameterChecker.check(text)
+                    for (unused in unusedIssues) {
+                        val declarationLine = unused.declarationLine
+                        val lineText = if (declarationLine < rawLines.size) rawLines[declarationLine] else ""
+                        val nameStart = lineText.indexOf(unused.paramName).coerceAtLeast(0)
+                        fileIssues.add(
+                            DiagnosticIssue(
+                                message = "Unused parameter '${unused.paramName}' — declared but never referenced in the template body",
+                                severity = IssueSeverity.WARNING,
+                                code = "unused-param",
+                                line = declarationLine,
+                                startColumn = nameStart,
+                                endColumn = (nameStart + unused.paramName.length).coerceAtMost(lineText.length),
+                                paramName = unused.paramName
+                            )
+                        )
                     }
 
                     if (fileIssues.isNotEmpty()) {
