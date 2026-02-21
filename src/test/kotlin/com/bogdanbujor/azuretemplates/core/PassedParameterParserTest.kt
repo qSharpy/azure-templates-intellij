@@ -196,6 +196,51 @@ class PassedParameterParserTest {
         assertEquals(3, result["environment"]?.second)
     }
 
+    // ── object-valued parameter as YAML sequence (list of mappings) ──────────
+
+    @Test
+    fun `object param passed as list with single item - list item keys are not collected`() {
+        // checkoutProperties is an object parameter passed as a YAML sequence.
+        // A single list item with only `reference` — neither `reference` nor any
+        // other key inside the list item should appear as a top-level parameter.
+        val yaml = """
+            - template: /api/checkout.yml
+              parameters:
+                checkoutProperties:
+                - reference: main
+        """
+        val result = parse(yaml)
+        assertEquals(1, result.size)
+        assertTrue(result.containsKey("checkoutProperties"))
+        assertNull(result["reference"])
+    }
+
+    @Test
+    fun `object param passed as list with two items one having alias - alias is not collected`() {
+        // Reproduces the exact failing scenario reported by the user:
+        //   checkoutProperties is declared as `object` in the template.
+        //   At the call site it is a YAML sequence; the second item has an `alias` key.
+        //   `alias` must NOT be reported as an unknown top-level parameter.
+        //
+        // Root cause was: `- reference: ...` sits at the same indent as
+        // `checkoutProperties:` (objectValueDepth).  The old condition
+        // `lineIndent <= objectValueDepth` fired, reset objectValueDepth to -1,
+        // and then `alias:` was collected as a top-level param.
+        val yaml = """
+            - template: /api/checkout.yml
+              parameters:
+                checkoutProperties:
+                - reference: main
+                - reference: feature/foo
+                  alias: foo
+        """
+        val result = parse(yaml)
+        assertEquals(1, result.size)
+        assertTrue(result.containsKey("checkoutProperties"))
+        assertNull(result["reference"])
+        assertNull(result["alias"])
+    }
+
     // ── object-valued parameters (Bug 4) ─────────────────────────────────────
 
     @Test

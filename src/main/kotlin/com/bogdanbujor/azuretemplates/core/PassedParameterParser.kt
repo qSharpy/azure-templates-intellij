@@ -143,12 +143,18 @@ object PassedParameterParser {
 
             // If we're inside an object-valued parameter's body, check whether we've
             // returned to the parameter-entry indent level.
+            //
+            // Special case: a YAML sequence item (`- key: value`) whose `-` sits at
+            // the same column as the object parameter entry is still part of that
+            // object's value — it is NOT a sibling parameter.  Only a non-list line
+            // at indent <= objectValueDepth signals that we have truly exited the body.
             if (objectValueDepth >= 0) {
-                if (lineIndent <= objectValueDepth) {
+                if (lineIndent <= objectValueDepth && !stripped.startsWith("-")) {
                     // Exited the object body — resume collecting parameter entries
                     objectValueDepth = -1
-                } else {
-                    // Still inside the object body — skip this line
+                } else if (lineIndent > objectValueDepth || stripped.startsWith("-")) {
+                    // Still inside the object body (deeper line, or a list item at
+                    // the same indent) — skip this line
                     continue
                 }
             }

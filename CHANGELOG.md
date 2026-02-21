@@ -2,6 +2,11 @@
 
 All notable changes to **Azure Templates Navigator** are documented here.
 
+## [1.8.1] — 2026-02-21
+
+### Fixed
+- **Object parameter passed as YAML sequence no longer triggers false "unknown parameter" warnings** — when an `object` parameter is passed as a list of mappings (e.g. `checkoutProperties:` followed by `- reference: …` / `- reference: … alias: …` items), keys inside those list items (such as `alias`) are no longer mistakenly collected as top-level parameters and reported as unknown. `PassedParameterParser` now treats YAML sequence items (`- …`) at the same indent as the object parameter entry as still being part of that object's value, not as sibling parameters.
+
 ## [1.8.0] — 2026-02-21
 
 ### Fixed
