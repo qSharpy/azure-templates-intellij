@@ -2,6 +2,11 @@
 
 All notable changes to **Azure Templates Navigator** are documented here.
 
+## [1.8.2] — 2026-02-21
+
+### Changed
+- **Compatibility extended to all future IntelliJ versions** — removed the upper build-number cap (`untilBuild`) so the plugin is available in IntelliJ 2025.3 and beyond without requiring a re-release for each new IDE version.
+
 ## [1.8.1] — 2026-02-21
 
 ### Fixed

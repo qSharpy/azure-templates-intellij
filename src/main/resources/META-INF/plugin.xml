@@ -26,6 +26,10 @@
     ]]></description>
 
     <change-notes><![CDATA[
+        <h3>1.8.2</h3>
+        <ul>
+            <li><b>Compatibility extended to all future IntelliJ versions</b> — removed the upper build-number cap (<code>untilBuild</code>) so the plugin is available in IntelliJ 2025.3 and beyond without requiring a re-release for each new IDE version</li>
+        </ul>
         <h3>1.8.1</h3>
         <ul>
             <li><b>Fix: object parameter passed as YAML sequence no longer triggers false "unknown parameter" warnings</b> — when an <code>object</code> parameter is passed as a list of mappings (e.g. <code>checkoutProperties:</code> followed by <code>- reference: …</code> / <code>- reference: … alias: …</code> items), keys inside those list items (such as <code>alias</code>) are no longer mistakenly collected as top-level parameters and reported as unknown</li>
