@@ -7,6 +7,20 @@ package com.bogdanbujor.azuretemplates.core
  *
  * Given a document's lines and the line number of the "- template:" line, scans the
  * "parameters:" sub-block that follows and returns a map of name to (value, line).
+ *
+ * ### Conditional expressions
+ * Azure Pipelines allows parameters to be passed conditionally using `${{ if ... }}:`,
+ * `${{ elseif ... }}:`, and `${{ else }}:` blocks.  Parameters nested inside these
+ * blocks are still valid passed parameters and must be collected, otherwise the
+ * validator incorrectly reports them as missing required parameters.
+ *
+ * ### Object-valued parameters
+ * Parameters of type `object` (or `step`, `job`, etc.) are passed as multi-line YAML
+ * mappings.  Their nested keys (e.g. `replicas`, `strategy`) are property values of
+ * the parameter, NOT sibling parameters.  The parser tracks the indent of each
+ * collected parameter entry and skips lines that are more deeply indented than it
+ * (i.e. they are the object's body), resuming when the indent returns to the
+ * parameter-entry level.
  */
 object PassedParameterParser {
 
@@ -14,7 +28,19 @@ object PassedParameterParser {
     private val PARAM_ENTRY = Regex("^(\\s+)([\\w-]+)\\s*:\\s*(.*)$")
 
     /**
+     * Matches Azure Pipelines compile-time expression control lines:
+     * `${{ if ... }}:`, `${{ elseif ... }}:`, `${{ else }}:`.
+     * These are structural lines inside a parameters block — not parameter entries.
+     */
+    private val CONDITIONAL_LINE = Regex("""^\s*\$\{\{\s*(?:if|elseif|else)[\s\S]*\}\}\s*:""")
+
+    /**
      * Parses parameters passed at a template call site.
+     *
+     * Parameters may appear directly under `parameters:` or nested inside
+     * `${{ if }}` / `${{ elseif }}` / `${{ else }}` conditional blocks.
+     * Object-valued parameters (empty value, body on subsequent indented lines)
+     * are collected as a single entry; their nested property lines are skipped.
      *
      * @param lines All lines of the document
      * @param templateLine 0-based index of the "- template:" line
@@ -29,9 +55,11 @@ object PassedParameterParser {
 
         var inParamsBlock = false
         var paramsIndent = -1
-        // The indent of the first non-empty line directly under "parameters:" —
-        // determined lazily on first encounter so we handle any indent width.
-        var childIndent = -1
+
+        // When >= 0, we are inside the body of an object-valued parameter.
+        // Lines with indent > objectValueDepth are skipped until we return to
+        // indent <= objectValueDepth, at which point we resume collecting params.
+        var objectValueDepth = -1
 
         for (i in (templateLine + 1) until lines.size) {
             val raw = lines[i]
@@ -59,23 +87,43 @@ object PassedParameterParser {
             // If we've gone back to or past the parameters: indent, we're done
             if (lineIndent <= paramsIndent) break
 
-            // Determine the child indent level from the first non-empty line we see
-            if (childIndent == -1) {
-                childIndent = lineIndent
-            }
-
-            // Only capture direct children of the parameters block (at the first child indent level)
-            if (lineIndent == childIndent) {
-                val paramMatch = PARAM_ENTRY.find(trimmed)
-                if (paramMatch != null) {
-                    val paramName = paramMatch.groupValues[2]
-                    val paramValue = paramMatch.groupValues[3].trim()
-                    if (!passed.containsKey(paramName)) {
-                        passed[paramName] = Pair(paramValue, i)
-                    }
+            // If we're inside an object-valued parameter's body, check whether we've
+            // returned to the parameter-entry indent level.
+            if (objectValueDepth >= 0) {
+                if (lineIndent <= objectValueDepth) {
+                    // Exited the object body — resume collecting parameter entries
+                    objectValueDepth = -1
+                } else {
+                    // Still inside the object body — skip this line
+                    continue
                 }
             }
-            // Lines deeper than childIndent are nested values — skip them
+
+            // Skip ${{ if }}:, ${{ elseif }}:, ${{ else }}: control lines —
+            // they are structural, not parameter entries.  Parameters nested
+            // inside these blocks are collected on subsequent iterations.
+            if (CONDITIONAL_LINE.containsMatchIn(trimmed)) continue
+
+            // Collect any key: value line inside the parameters block.
+            // Parameters may appear directly under `parameters:` or nested one
+            // level deeper inside a ${{ if }}:/${{ else }}: block — both are valid.
+            val paramMatch = PARAM_ENTRY.find(trimmed)
+            if (paramMatch != null) {
+                val entryIndent = paramMatch.groupValues[1].length
+                val paramName  = paramMatch.groupValues[2]
+                val paramValue = paramMatch.groupValues[3].trim()
+
+                if (!passed.containsKey(paramName)) {
+                    passed[paramName] = Pair(paramValue, i)
+                }
+
+                // If the value is empty, the parameter's value is a multi-line YAML
+                // object on the following indented lines.  Record this entry's indent
+                // so we can skip those nested property lines.
+                if (paramValue.isEmpty()) {
+                    objectValueDepth = entryIndent
+                }
+            }
         }
 
         return passed

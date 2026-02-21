@@ -1,0 +1,58 @@
+##
+## Edge case: parameters used ONLY inside ${{ if parameters.name }}: variable blocks.
+##
+## Before the bug fix, the plugin would report isProd, targetEnv, and region as
+## "unused" because the old PARAM_REF_REGEX only matched:
+##   ${{ if eq(parameters.name, ...) }}   ← function-call form
+## and missed:
+##   ${{ if parameters.name }}:           ← bare condition form (no function call)
+##
+## All three parameters below are legitimately used — just as bare if/elseif
+## conditions that drive variable selection.  The plugin must NOT flag them.
+##
+
+parameters:
+  # REQUIRED — drives the variable block below
+  - name: isProd
+    type: boolean
+  # REQUIRED — selects the target environment tier
+  - name: targetEnv
+    type: string
+  # REQUIRED — selects the Azure region
+  - name: region
+    type: string
+
+variables:
+  # ── Tier selection via bare ${{ if parameters.targetEnv }}: ──────────────────
+  # Edge case: parameter used as a bare truthiness check (no eq/ne wrapper).
+  ${{ if parameters.isProd }}:
+    deploymentTier: production
+    replicaCount: '3'
+    logLevel: warn
+  ${{ else }}:
+    deploymentTier: non-production
+    replicaCount: '1'
+    logLevel: debug
+
+  # ── Region-specific settings via ${{ if parameters.region }}: ────────────────
+  # Edge case: string parameter used as a bare condition (truthy when non-empty).
+  ${{ if parameters.region }}:
+    storageAccountSuffix: ${{ parameters.region }}
+  ${{ else }}:
+    storageAccountSuffix: eastus
+
+  # ── Multi-level nesting: outer condition + inner bare parameter check ─────────
+  # Edge case: deeply nested ${{ if }}: blocks where the innermost one references
+  # a parameter directly.
+  ${{ if ne(variables['Build.Reason'], 'PullRequest') }}:
+    ${{ if ne(variables['System.TeamProject'], '') }}:
+      ${{ if parameters.targetEnv }}:
+        targetUrl: https://${{ parameters.targetEnv }}.example.com
+
+steps:
+  - script: |
+      echo "Tier:    $(deploymentTier)"
+      echo "Replicas: $(replicaCount)"
+      echo "Log:     $(logLevel)"
+      echo "Storage: $(storageAccountSuffix)"
+    displayName: 'Print resolved variables'

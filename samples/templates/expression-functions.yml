@@ -1,0 +1,73 @@
+##
+## Edge case: parameters referenced via expression functions rather than plain
+## ${{ parameters.name }} substitution.
+##
+## Two distinct patterns are exercised here:
+##
+##   1. replace(parameters.appName, ...)
+##      — dot-access form: the plugin detects 'appName' specifically as used.
+##        Any OTHER parameter not referenced elsewhere is still flagged as unused.
+##
+##   2. convertToJson(parameters)
+##      — bare-object form: the ENTIRE parameters object is serialised.
+##        The plugin must consider ALL declared parameters as used and must NOT
+##        flag any of them as unused, even if they never appear with a dot-access.
+##
+## Before the Bug 3 fix, convertToJson(parameters) was not recognised and every
+## parameter in this template would have been reported as "unused".
+##
+
+parameters:
+  # REQUIRED — used via replace(parameters.appName, ...) (dot-access)
+  - name: appName
+    type: string
+  # REQUIRED — used via replace(parameters.environment, ...) (dot-access)
+  - name: environment
+    type: string
+  # REQUIRED — used ONLY via convertToJson(parameters) (bare-object reference).
+  # Before the fix this would have been falsely reported as "unused".
+  - name: deployConfig
+    type: object
+  # Optional — also only consumed via convertToJson(parameters).
+  - name: tags
+    type: object
+    default: {}
+  # Optional — used in a plain substitution AND in replace()
+  - name: imageTag
+    type: string
+    default: 'latest'
+
+variables:
+  # Derive a safe resource name by replacing hyphens with underscores.
+  # replace(parameters.appName, ...) — dot-access: 'appName' detected as used.
+  safeName: ${{ replace(parameters.appName, '-', '_') }}
+
+  # Build a fully-qualified image tag.
+  # replace(parameters.environment, ...) — dot-access: 'environment' detected as used.
+  imageRef: myregistry.azurecr.io/${{ replace(parameters.environment, '/', '-') }}/${{ parameters.appName }}:${{ parameters.imageTag }}
+
+steps:
+  - script: |
+      echo "Safe name : $(safeName)"
+      echo "Image ref : $(imageRef)"
+    displayName: 'Print derived variables'
+
+  # ── convertToJson(parameters) — bare-object reference ────────────────────────
+  # Serialises the entire parameters object so a downstream script can consume
+  # all values without listing them individually.
+  # The plugin must treat ALL declared parameters as used when it sees this form.
+  - task: PowerShell@2
+    displayName: 'Pass full parameter set to deployment script'
+    inputs:
+      targetType: inline
+      script: |
+        $params = '${{ convertToJson(parameters) }}' | ConvertFrom-Json
+        Write-Host "Deploying $($params.appName) to $($params.environment)"
+        Write-Host "Config: $($params.deployConfig | ConvertTo-Json -Compress)"
+        Write-Host "Tags:   $($params.tags | ConvertTo-Json -Compress)"
+
+  # ── coalesce with dot-access — only the named param is detected ───────────────
+  # coalesce(parameters.imageTag, 'latest') — dot-access: 'imageTag' detected.
+  - script: |
+      echo "Image tag: ${{ coalesce(parameters.imageTag, 'latest') }}"
+    displayName: 'Print image tag (with coalesce fallback)'

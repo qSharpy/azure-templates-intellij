@@ -1,0 +1,240 @@
+##
+## Edge Cases Showcase Pipeline
+##
+## This file demonstrates every hard edge case that the Azure Templates Navigator
+## plugin must handle correctly.  Each call site is annotated with the specific
+## scenario it exercises.
+##
+## ┌─────────────────────────────────────────────────────────────────────────────┐
+## │  CALL-SITE EDGE CASES (PassedParameterParser / CallSiteValidator)           │
+## │                                                                             │
+## │  These are cases where parameters are passed CONDITIONALLY at the call      │
+## │  site.  The plugin must NOT report them as "missing required parameter".    │
+## └─────────────────────────────────────────────────────────────────────────────┘
+##
+## ┌─────────────────────────────────────────────────────────────────────────────┐
+## │  TEMPLATE-BODY EDGE CASES (UnusedParameterChecker)                         │
+## │                                                                             │
+## │  These are cases where parameters are used ONLY inside ${{ if }}: blocks   │
+## │  in the template body.  The plugin must NOT report them as "unused".        │
+## └─────────────────────────────────────────────────────────────────────────────┘
+##
+
+trigger: none
+
+parameters:
+  - name: environment
+    type: string
+    default: dev
+    values: [dev, staging, prod]
+  - name: isProd
+    type: boolean
+    default: false
+  - name: runSmokeTests
+    type: boolean
+    default: true
+  - name: region
+    type: string
+    default: eastus
+
+pool:
+  vmImage: ubuntu-latest
+
+stages:
+  - stage: EdgeCases
+    displayName: 'Edge Cases Showcase'
+    jobs:
+
+      # ══════════════════════════════════════════════════════════════════════════
+      # CALL-SITE EDGE CASE 1
+      # A single required parameter wrapped in ${{ if }}:
+      # Before fix: plugin reported 'testFilter' as missing required parameter.
+      # After fix:  plugin correctly sees it is passed (conditionally).
+      # ══════════════════════════════════════════════════════════════════════════
+      - job: CallSite_SingleIf
+        displayName: 'Call-site: single ${{ if }} wrapping required param'
+        steps:
+          - template: /samples/templates/conditional-steps.yml
+            parameters:
+              testFramework: xunit
+              publishResults: true
+              collectCoverage: true
+              failOnCoverageDecrease: false
+              # 'testFilter' is required (no default) — passed only when smoke tests run.
+              ${{ if parameters.runSmokeTests }}:
+                testFilter: 'Category=Smoke'
+
+      # ══════════════════════════════════════════════════════════════════════════
+      # CALL-SITE EDGE CASE 2
+      # Required parameter passed in BOTH branches of ${{ if }}/${{ else }}:
+      # The plugin must collect it from whichever branch it finds first.
+      # ══════════════════════════════════════════════════════════════════════════
+      - job: CallSite_IfElse
+        displayName: 'Call-site: required param in both if/else branches'
+        steps:
+          - template: /samples/templates/deploy-webapp.yml
+            parameters:
+              azureSubscription: Azure-${{ parameters.environment }}-SC
+              appName: myapp-${{ parameters.environment }}
+              # 'environment' (required) is in both branches — plugin must not flag it.
+              ${{ if parameters.isProd }}:
+                environment: Production
+                slot: staging
+                appType: webAppLinux
+              ${{ else }}:
+                environment: ${{ parameters.environment }}
+                appType: webApp
+
+      # ══════════════════════════════════════════════════════════════════════════
+      # CALL-SITE EDGE CASE 3
+      # ${{ if }}/${{ elseif }}/${{ else }}: — three-branch conditional.
+      # Different optional params in each branch; required params always present.
+      # ══════════════════════════════════════════════════════════════════════════
+      - job: CallSite_IfElseifElse
+        displayName: 'Call-site: if/elseif/else with different params per branch'
+        steps:
+          - template: /samples/templates/deploy-webapp.yml
+            parameters:
+              azureSubscription: Azure-${{ parameters.environment }}-SC
+              appName: myapp-${{ parameters.environment }}
+              ${{ if eq(parameters.environment, 'prod') }}:
+                environment: Production
+                slot: staging
+                appType: webAppLinux
+                resourceGroup: rg-prod
+              ${{ elseif eq(parameters.environment, 'staging') }}:
+                environment: Staging
+                slot: production
+                appType: webApp
+                resourceGroup: rg-staging
+              ${{ else }}:
+                environment: Development
+                appType: webApp
+                resourceGroup: rg-dev
+
+      # ══════════════════════════════════════════════════════════════════════════
+      # CALL-SITE EDGE CASE 4
+      # Condition references a pipeline VARIABLE (not a parameter).
+      # The params inside the block are still valid passed parameters.
+      # ══════════════════════════════════════════════════════════════════════════
+      - job: CallSite_VariableCondition
+        displayName: 'Call-site: condition uses pipeline variable, not parameter'
+        steps:
+          - template: /samples/templates/build-dotnet.yml
+            parameters:
+              buildConfiguration: Release
+              # Condition uses variables['Build.Reason'] — a runtime variable.
+              # The params inside are still collected correctly.
+              ${{ if eq(variables['Build.Reason'], 'PullRequest') }}:
+                project: 'src/**/*.csproj'
+                publishArtifact: false
+              ${{ else }}:
+                project: '**/*.csproj'
+                publishArtifact: true
+                artifactName: drop-${{ parameters.environment }}
+
+      # ══════════════════════════════════════════════════════════════════════════
+      # CALL-SITE EDGE CASE 5
+      # Multiple required params ALL inside a single ${{ if }}: block.
+      # Before fix: ALL of them were reported as missing.
+      # ══════════════════════════════════════════════════════════════════════════
+      - job: CallSite_MultipleParamsInOneIf
+        displayName: 'Call-site: multiple required params inside one if block'
+        steps:
+          - template: /samples/templates/conditional-variables.yml
+            parameters:
+              # All three required params are inside the same ${{ if }}: block.
+              ${{ if ne(variables['Build.Reason'], 'PullRequest') }}:
+                isProd: ${{ parameters.isProd }}
+                targetEnv: ${{ parameters.environment }}
+                region: ${{ parameters.region }}
+
+      # ══════════════════════════════════════════════════════════════════════════
+      # CALL-SITE EDGE CASE 6
+      # Mix of unconditional and conditional params in the same parameters block.
+      # ══════════════════════════════════════════════════════════════════════════
+      - job: CallSite_MixedConditional
+        displayName: 'Call-site: mix of unconditional and conditional params'
+        steps:
+          - template: /samples/templates/run-tests.yml
+            parameters:
+              # Unconditional — always passed
+              testProject: '**/*Tests.csproj'
+              buildConfiguration: Release
+              # Conditional — only passed when coverage is needed
+              ${{ if parameters.isProd }}:
+                collectCoverage: true
+                publishResults: true
+              ${{ else }}:
+                collectCoverage: false
+                publishResults: false
+              # Another unconditional param after the conditional block
+              ${{ if ne(parameters.region, '') }}:
+                testFilter: 'Region=${{ parameters.region }}'
+
+      # ══════════════════════════════════════════════════════════════════════════
+      # TEMPLATE-BODY EDGE CASE 1
+      # Parameters used only as bare ${{ if parameters.name }}: conditions
+      # (no function call wrapper like eq/ne).
+      # Template: conditional-variables.yml
+      # Before fix: isProd, targetEnv, region all reported as "unused".
+      # After fix:  none of them are flagged.
+      # ══════════════════════════════════════════════════════════════════════════
+      - job: TemplateBody_BareIfCondition
+        displayName: 'Template body: params used only as bare if conditions'
+        steps:
+          - template: /samples/templates/conditional-variables.yml
+            parameters:
+              isProd: ${{ parameters.isProd }}
+              targetEnv: ${{ parameters.environment }}
+              region: ${{ parameters.region }}
+
+      # ══════════════════════════════════════════════════════════════════════════
+      # TEMPLATE-BODY EDGE CASE 2
+      # Parameters used only inside ${{ each item in parameters.list }}: loops.
+      # Template: each-and-insert.yml
+      # 'services' and 'extraEnv' are only referenced via each/insert — never
+      # in a plain ${{ parameters.x }} substitution.
+      # ══════════════════════════════════════════════════════════════════════════
+      - job: TemplateBody_EachAndInsert
+        displayName: 'Template body: params used only in each/insert expressions'
+        steps:
+          - template: /samples/templates/each-and-insert.yml
+            parameters:
+              environment: ${{ parameters.environment }}
+              services:
+                - name: api
+                  appName: myapp-${{ parameters.environment }}-api
+                  subscription: Azure-${{ parameters.environment }}-SC
+              extraEnv:
+                REGION: ${{ parameters.region }}
+                IS_PROD: ${{ parameters.isProd }}
+              additionalInputs: {}
+
+      # ══════════════════════════════════════════════════════════════════════════
+      # TEMPLATE-BODY EDGE CASE 3
+      # Parameters referenced via expression functions:
+      #   a) replace(parameters.appName, ...)  — dot-access: only 'appName' used
+      #   b) convertToJson(parameters)         — bare-object: ALL params used
+      #
+      # Template: expression-functions.yml
+      # Before Bug 3 fix: 'deployConfig' and 'tags' were reported as "unused"
+      # because they only appear inside convertToJson(parameters), not as
+      # individual ${{ parameters.x }} references.
+      # After fix: the bare-object reference marks all params as used.
+      # ══════════════════════════════════════════════════════════════════════════
+      - job: TemplateBody_ExpressionFunctions
+        displayName: 'Template body: replace(parameters.x) and convertToJson(parameters)'
+        steps:
+          - template: /samples/templates/expression-functions.yml
+            parameters:
+              appName: myapp-${{ parameters.environment }}
+              environment: ${{ parameters.environment }}
+              imageTag: ${{ parameters.isProd }}
+              deployConfig:
+                replicas: 3
+                strategy: RollingUpdate
+                healthCheckPath: /health
+              tags:
+                team: platform
+                env: ${{ parameters.environment }}

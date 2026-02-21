@@ -21,13 +21,43 @@ package com.bogdanbujor.azuretemplates.core
 object UnusedParameterChecker {
 
     /**
-     * Matches `${{ parameters.someName }}` with optional whitespace inside the
-     * expression delimiters.  The capture group 1 holds the parameter name.
+     * Matches any reference to `parameters.<name>` anywhere in a line.
+     * The capture group 1 holds the parameter name.
      *
-     * Also matches the short-hand `parameters.name` used inside `if` expressions
-     * such as `${{ if eq(parameters.runTests, true) }}`.
+     * This intentionally uses a simple `\bparameters\.(\w+)\b` pattern rather
+     * than anchoring to `${{` so that it covers all reference forms:
+     *
+     * - `${{ parameters.name }}`                    — direct substitution
+     * - `${{ if eq(parameters.name, true) }}`       — inside a function call
+     * - `${{ if parameters.name }}:`                — bare if condition (no function)
+     * - `${{ elseif parameters.name }}:`            — elseif condition
+     * - `${{ replace(parameters.name, 'a', 'b') }}` — string function wrapping a param
+     * - `${{ each item in parameters.list }}:`      — each loop source
+     * - Nested / deeply-indented variants of all of the above
+     *
+     * Using `\b` word boundaries prevents `parameters.run` from matching
+     * a reference to `parameters.runTests`.
      */
-    private val PARAM_REF_REGEX = Regex("""\$\{\{\s*(?:if\s+\S+\()?parameters\.(\w+)""")
+    private val PARAM_REF_REGEX = Regex("""\bparameters\.(\w+)\b""")
+
+    /**
+     * Matches a bare `parameters` reference inside a `${{ ... }}` expression —
+     * i.e. the entire parameters object is passed to a function without selecting
+     * a specific property:
+     *
+     * - `${{ convertToJson(parameters) }}`
+     * - `${{ coalesce(parameters, '{}') }}`
+     * - `${{ length(parameters) }}`
+     *
+     * The pattern requires `parameters` to be preceded (anywhere on the line) by
+     * `${{` and to be followed by `)`, `,`, whitespace, or `}}` — NOT by `.`
+     * (which would be a named property access caught by [PARAM_REF_REGEX] instead)
+     * and NOT by `:` (which would be the YAML `parameters:` key).
+     *
+     * When this pattern is found anywhere in the file, ALL declared parameters
+     * are considered "used" because the whole object is consumed at runtime.
+     */
+    private val BARE_PARAMS_REGEX = Regex("""\$\{\{[^}]*\bparameters\b(?!\s*[.:\w])""")
 
     /**
      * Analyses [text] (raw YAML file contents) and returns one [UnusedParameterIssue]
@@ -44,6 +74,11 @@ object UnusedParameterChecker {
         // Collect every parameter name that is actually referenced anywhere in the file.
         val referencedNames = mutableSetOf<String>()
         for (line in normalised.split("\n")) {
+            // If the entire parameters object is referenced (e.g. convertToJson(parameters)),
+            // all declared parameters are implicitly used — short-circuit immediately.
+            if (BARE_PARAMS_REGEX.containsMatchIn(line)) {
+                return emptyList()
+            }
             PARAM_REF_REGEX.findAll(line).forEach { match ->
                 referencedNames += match.groupValues[1]
             }

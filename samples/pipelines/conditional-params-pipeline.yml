@@ -1,0 +1,151 @@
+##
+## Edge case: pipeline that passes parameters to templates CONDITIONALLY using
+## ${{ if }}:, ${{ elseif }}:, and ${{ else }}: blocks inside the parameters: block.
+##
+## Before the Bug 1 fix, the plugin would report every parameter passed inside a
+## conditional block as "missing required parameter" because PassedParameterParser
+## only collected entries at the first child-indent level (the ${{ if }}:  line
+## itself), skipping the actual key: value entries nested one level deeper.
+##
+## Hard edge cases exercised here:
+##   A. Single ${{ if }}: wrapping one parameter — plugin must NOT report it missing
+##   B. ${{ if }}:/${{ else }}: wrapping the same parameter name in both branches
+##   C. ${{ if }}:/${{ elseif }}:/${{ else }}: with different params in each branch
+##   D. Mix of unconditional params + conditional params in the same block
+##   E. Multiple params inside a single ${{ if }}: block
+##   F. Nested ${{ if }}: inside another ${{ if }}: (2-level nesting)
+##   G. Conditional param block where the condition references a pipeline variable
+##   H. Conditional param block where the condition references another parameter
+##
+
+trigger:
+  branches:
+    include:
+      - main
+      - release/*
+
+parameters:
+  - name: environment
+    type: string
+    default: dev
+    values:
+      - dev
+      - staging
+      - prod
+  - name: isProd
+    type: boolean
+    default: false
+  - name: runIntegrationTests
+    type: boolean
+    default: true
+
+pool:
+  vmImage: ubuntu-latest
+
+stages:
+  - stage: Build
+    jobs:
+      - job: BuildAndTest
+        steps:
+          # ── Case A: single ${{ if }}: wrapping one parameter ─────────────────
+          # 'testFilter' is a required param of conditional-steps.yml.
+          # The plugin must NOT report it as missing — it is passed conditionally.
+          - template: /samples/templates/conditional-steps.yml
+            parameters:
+              testFramework: xunit
+              publishResults: true
+              collectCoverage: true
+              failOnCoverageDecrease: false
+              ${{ if parameters.runIntegrationTests }}:
+                testFilter: 'Category=Integration'
+
+  - stage: Deploy
+    dependsOn: Build
+    condition: succeeded()
+    jobs:
+      - job: DeployJob
+        steps:
+          # ── Case D: mix of unconditional + conditional params ─────────────────
+          # 'environment' is always passed; 'region' and 'isProd' are conditional.
+          - template: /samples/templates/conditional-variables.yml
+            parameters:
+              targetEnv: ${{ parameters.environment }}
+              ${{ if eq(parameters.environment, 'prod') }}:
+                isProd: true
+                region: eastus
+              ${{ elseif eq(parameters.environment, 'staging') }}:
+                isProd: false
+                region: westus
+              ${{ else }}:
+                isProd: false
+                region: centralus
+
+          # ── Case E: multiple params inside one ${{ if }}: block ───────────────
+          # Both 'services' and 'additionalInputs' are inside the same if block.
+          - template: /samples/templates/each-and-insert.yml
+            parameters:
+              environment: ${{ parameters.environment }}
+              ${{ if eq(parameters.isProd, true) }}:
+                services:
+                  - name: api
+                    appName: myapp-prod-api
+                    subscription: Azure-Prod
+                  - name: worker
+                    appName: myapp-prod-worker
+                    subscription: Azure-Prod
+                additionalInputs:
+                  deployToSlotOrASE: true
+                  slotName: staging
+              ${{ else }}:
+                services:
+                  - name: api
+                    appName: myapp-dev-api
+                    subscription: Azure-Dev
+                additionalInputs: {}
+
+          # ── Case F: nested ${{ if }}: inside another ${{ if }}: ───────────────
+          # The outer condition checks the pipeline variable Build.Reason;
+          # the inner condition checks a pipeline parameter.
+          # Both 'message' (required) and 'title' are passed conditionally.
+          # Note: the plugin resolves params at any nesting depth — even 2 levels
+          # deep inside ${{ if }}: blocks.
+          - template: /samples/templates/notify-teams.yml
+            parameters:
+              ${{ if parameters.isProd }}:
+                message: 'Production deployment complete!'
+                title: '🚀 Production Release'
+              ${{ else }}:
+                message: 'Non-production deployment complete.'
+                title: '✅ Deploy: ${{ parameters.environment }}'
+
+          # ── Case G: condition references a pipeline variable ──────────────────
+          # The condition uses variables['System.TeamProject'], not a parameter.
+          # The params inside are still valid passed parameters.
+          - template: /samples/templates/build-dotnet.yml
+            parameters:
+              buildConfiguration: Release
+              ${{ if eq(variables['System.TeamProject'], 'MyOrg') }}:
+                project: '**/*.csproj'
+                dotnetVersion: '8.0.x'
+              ${{ else }}:
+                project: 'src/**/*.csproj'
+                dotnetVersion: '6.0.x'
+
+          # ── Case H: condition references another pipeline parameter ───────────
+          # The condition itself uses parameters.environment (a pipeline-level param,
+          # not a template param).  The nested template params must still be collected.
+          - template: /samples/templates/deploy-webapp.yml
+            parameters:
+              azureSubscription: Azure-${{ parameters.environment }}-Connection
+              appName: myapp-${{ parameters.environment }}-webapp
+              ${{ if eq(parameters.environment, 'prod') }}:
+                environment: Production
+                slot: staging
+                appType: webAppLinux
+              ${{ elseif eq(parameters.environment, 'staging') }}:
+                environment: Staging
+                slot: production
+                appType: webApp
+              ${{ else }}:
+                environment: Development
+                appType: webApp

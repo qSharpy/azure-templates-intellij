@@ -1,0 +1,67 @@
+##
+## Edge case: parameters used inside ${{ each }} and ${{ insert }} expressions.
+##
+## Azure Pipelines supports two more compile-time expression forms that reference
+## parameters:
+##
+##   ${{ each item in parameters.myList }}:   — iterates over an object/list param
+##   ${{ insert }}:                           — merges an object param into a mapping
+##
+## Hard edge cases exercised here:
+##   1. Parameter used only as the collection in an ${{ each }} loop
+##   2. Loop variable (item) referenced inside the loop body — must not be confused
+##      with a parameter reference
+##   3. Parameter used only via ${{ insert }} (merges extra steps/variables in)
+##   4. Parameter used both as an ${{ each }} source AND in a plain substitution
+##   5. Object-type parameter whose value is spread into a task's inputs via insert
+##
+
+parameters:
+  # REQUIRED — list of service names to deploy (object/list type)
+  - name: services
+    type: object
+  # REQUIRED — extra environment variables to inject into every step
+  - name: extraEnv
+    type: object
+    default: {}
+  # REQUIRED — additional task inputs merged via ${{ insert }}
+  - name: additionalInputs
+    type: object
+    default: {}
+  - name: environment
+    type: string
+    default: 'dev'
+  - name: parallelism
+    type: number
+    default: 1
+
+steps:
+  # ── Edge case 1 & 4: parameter used as ${{ each }} collection ────────────────
+  # 'services' is referenced only as the source of the each loop, never in a
+  # plain ${{ parameters.services }} substitution.
+  - ${{ each service in parameters.services }}:
+    - task: AzureWebApp@1
+      displayName: 'Deploy ${{ service.name }} to ${{ parameters.environment }}'
+      inputs:
+        azureSubscription: '${{ service.subscription }}'
+        appName: '${{ service.appName }}'
+        package: '$(Pipeline.Workspace)/${{ service.name }}/**/*.zip'
+        # ── Edge case 5: ${{ insert }} merges additionalInputs into task inputs ─
+        ${{ insert }}: ${{ parameters.additionalInputs }}
+
+  # ── Edge case 3: parameter used only via ${{ insert }} ───────────────────────
+  # 'extraEnv' is never referenced in a plain substitution — only spread via insert.
+  - script: |
+      echo "Deploying with parallelism=${{ parameters.parallelism }}"
+    displayName: 'Print deploy config'
+    env:
+      ENVIRONMENT: ${{ parameters.environment }}
+      # Merge all extra env vars from the caller without listing them explicitly.
+      ${{ insert }}: ${{ parameters.extraEnv }}
+
+  # ── Edge case 2: loop variable must not shadow parameter name ─────────────────
+  # If a caller passes a parameter named 'service' (singular), the plugin must
+  # not confuse references to the loop variable 'service' with that parameter.
+  - ${{ each service in parameters.services }}:
+    - script: echo "Health-checking ${{ service.name }}"
+      displayName: 'Health check: ${{ service.name }}'

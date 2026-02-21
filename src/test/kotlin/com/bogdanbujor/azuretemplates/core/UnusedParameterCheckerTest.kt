@@ -277,4 +277,237 @@ class UnusedParameterCheckerTest {
         """
         assertTrue(check(yaml).isEmpty())
     }
+
+    // ── Bug 2: parameters used inside ${{ if parameters.name }}: form ─────────
+
+    @Test
+    fun `parameter used as bare if condition without function call - not flagged`() {
+        // Bug 2: ${{ if parameters.isProd }}: was not matched by the old regex
+        // because it required a function call wrapper like eq(...).
+        val yaml = """
+            parameters:
+              - name: isProd
+                type: boolean
+                default: false
+
+            variables:
+              ${'$'}{{ if parameters.isProd }}:
+                myVariable: deploy_prod
+        """
+        assertTrue(check(yaml).isEmpty())
+    }
+
+    @Test
+    fun `parameter used as bare elseif condition - not flagged`() {
+        val yaml = """
+            parameters:
+              - name: env
+                type: string
+                default: dev
+
+            variables:
+              ${'$'}{{ if eq(parameters.env, 'prod') }}:
+                tier: production
+              ${'$'}{{ elseif parameters.env }}:
+                tier: staging
+        """
+        assertTrue(check(yaml).isEmpty())
+    }
+
+    @Test
+    fun `parameter used inside nested if conditions - not flagged`() {
+        // Mirrors the exact scenario from the bug report:
+        // variables:
+        //   ${{ if ... }}:
+        //     ${{ if ... }}:
+        //       ${{ if parameters.isProd }}:
+        //         myVariable: deploy_prod
+        val yaml = """
+            parameters:
+              - name: isProd
+                type: boolean
+                default: false
+
+            variables:
+              ${'$'}{{ if ne(variables['Build.Reason'], 'PullRequest') }}:
+                ${'$'}{{ if eq(variables['System.TeamProject'], 'MyProject') }}:
+                  ${'$'}{{ if parameters.isProd }}:
+                    myVariable: deploy_prod
+        """
+        assertTrue(check(yaml).isEmpty())
+    }
+
+    @Test
+    fun `parameter used only as bare if condition key - not flagged`() {
+        // Ensure the parameter is detected even when it appears only as a
+        // mapping key in the form  ${{ if parameters.name }}:
+        val yaml = """
+            parameters:
+              - name: deployToProduction
+                type: boolean
+                default: false
+
+            stages:
+              - stage: Deploy
+                jobs:
+                  - job: DeployJob
+                    steps:
+                      - ${'$'}{{ if parameters.deployToProduction }}:
+                        - script: echo deploying to production
+        """
+        assertTrue(check(yaml).isEmpty())
+    }
+
+    @Test
+    fun `truly unused parameter alongside conditionally-used one - only unused flagged`() {
+        val yaml = """
+            parameters:
+              - name: isProd
+                type: boolean
+                default: false
+              - name: reallyUnused
+                type: string
+                default: nope
+
+            variables:
+              ${'$'}{{ if parameters.isProd }}:
+                myVariable: deploy_prod
+        """
+        val issues = check(yaml)
+        assertEquals(1, issues.size)
+        assertEquals("reallyUnused", issues[0].paramName)
+    }
+
+    // ── Bug 3: bare parameters object reference (convertToJson, coalesce, etc.) ─
+
+    @Test
+    fun `convertToJson(parameters) - all params considered used`() {
+        // Bug 3: ${{ convertToJson(parameters) }} passes the entire parameters object.
+        // No individual parameters.name reference exists, but all params are implicitly used.
+        val yaml = """
+            parameters:
+              - name: config
+                type: object
+              - name: environment
+                type: string
+
+            steps:
+              - script: |
+                  echo '${'$'}{{ convertToJson(parameters) }}'
+                displayName: 'Dump all parameters as JSON'
+        """
+        assertTrue(check(yaml).isEmpty())
+    }
+
+    @Test
+    fun `coalesce with bare parameters object - all params considered used`() {
+        val yaml = """
+            parameters:
+              - name: overrides
+                type: object
+                default: {}
+
+            steps:
+              - script: echo ${'$'}{{ coalesce(parameters, '{}') }}
+        """
+        assertTrue(check(yaml).isEmpty())
+    }
+
+    @Test
+    fun `length(parameters) - all params considered used`() {
+        val yaml = """
+            parameters:
+              - name: items
+                type: object
+
+            steps:
+              - script: echo ${'$'}{{ length(parameters) }}
+        """
+        assertTrue(check(yaml).isEmpty())
+    }
+
+    @Test
+    fun `replace wrapping parameters dot name - only that specific param detected as used`() {
+        // ${{ replace(parameters.appName, '-', '_') }} — has a dot, so PARAM_REF_REGEX
+        // matches 'appName' specifically.  Only 'appName' is used; 'other' is unused.
+        val yaml = """
+            parameters:
+              - name: appName
+                type: string
+              - name: other
+                type: string
+                default: nope
+
+            steps:
+              - script: echo ${'$'}{{ replace(parameters.appName, '-', '_') }}
+        """
+        val issues = check(yaml)
+        assertEquals(1, issues.size)
+        assertEquals("other", issues[0].paramName)
+    }
+
+    @Test
+    fun `coalesce wrapping parameters dot name - only that specific param detected as used`() {
+        // ${{ coalesce(parameters.slot, 'production') }} — has a dot, so only
+        // 'slot' is detected as used; 'other' remains unused.
+        val yaml = """
+            parameters:
+              - name: slot
+                type: string
+                default: ''
+              - name: other
+                type: string
+                default: nope
+
+            steps:
+              - script: echo ${'$'}{{ coalesce(parameters.slot, 'production') }}
+        """
+        val issues = check(yaml)
+        assertEquals(1, issues.size)
+        assertEquals("other", issues[0].paramName)
+    }
+
+    @Test
+    fun `bare parameters reference alongside named refs - all params considered used`() {
+        // If convertToJson(parameters) appears, ALL params are considered used —
+        // even those that would otherwise be flagged.
+        val yaml = """
+            parameters:
+              - name: config
+                type: object
+              - name: neverUsedDirectly
+                type: string
+                default: hello
+
+            steps:
+              - script: echo ${'$'}{{ convertToJson(parameters) }}
+              - script: echo ${'$'}{{ parameters.config }}
+        """
+        // convertToJson(parameters) makes all params "used" — nothing flagged.
+        assertTrue(check(yaml).isEmpty())
+    }
+
+    @Test
+    fun `word parameters in plain string or comment does not trigger bare match`() {
+        // The word "parameters" appearing in a plain YAML string value or comment
+        // must not suppress unused-parameter detection.
+        val yaml = """
+            parameters:
+              - name: used
+                type: string
+              - name: unused
+                type: string
+                default: nope
+
+            steps:
+              - script: echo ${'$'}{{ parameters.used }}
+                displayName: 'This step uses parameters'
+                # parameters are important
+        """
+        // "parameters" in displayName and comment — but no bare ${{ parameters }} expression.
+        // 'unused' should still be flagged.
+        val issues = check(yaml)
+        assertEquals(1, issues.size)
+        assertEquals("unused", issues[0].paramName)
+    }
 }

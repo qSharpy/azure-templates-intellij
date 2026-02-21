@@ -1,0 +1,109 @@
+##
+## Edge case: parameters used inside deeply nested ${{ if }}/${{ elseif }}/${{ else }}
+## step injection blocks.
+##
+## Azure Pipelines allows entire step lists to be conditionally injected using
+## compile-time expressions.  Parameters that only appear as conditions in these
+## blocks (never in a plain ${{ parameters.name }} substitution) must still be
+## considered "used" by the plugin.
+##
+## Hard edge cases exercised here:
+##   1. Parameter used only as an ${{ if eq(parameters.x, ...) }}: step-list guard
+##   2. Parameter used only in an ${{ elseif ... }}: branch (no if branch uses it)
+##   3. Parameter used only in an ${{ else }}: branch body (not in the condition)
+##   4. Parameter used as a bare ${{ if parameters.flag }}: truthiness check
+##   5. Parameter used inside a nested (2-level) conditional step block
+##   6. Parameter referenced only in a displayName / script string inside a
+##      conditional block (not in the condition expression itself)
+##
+
+parameters:
+  # REQUIRED
+  - name: testFramework
+    type: string
+    # values: xunit | nunit | mstest
+  # REQUIRED
+  - name: publishResults
+    type: boolean
+  # REQUIRED
+  - name: collectCoverage
+    type: boolean
+  # REQUIRED
+  - name: failOnCoverageDecrease
+    type: boolean
+  - name: coverageThreshold
+    type: number
+    default: 80
+  - name: testFilter
+    type: string
+    default: ''
+  - name: extraArgs
+    type: string
+    default: ''
+
+steps:
+  # ── Edge case 1: parameter used only as an if-condition ──────────────────────
+  # testFramework never appears in a plain substitution — only as a condition.
+  - ${{ if eq(parameters.testFramework, 'xunit') }}:
+    - task: DotNetCoreCLI@2
+      displayName: 'Run xUnit tests'
+      inputs:
+        command: test
+        arguments: '--logger trx'
+
+  - ${{ elseif eq(parameters.testFramework, 'nunit') }}:
+    - task: DotNetCoreCLI@2
+      displayName: 'Run NUnit tests'
+      inputs:
+        command: test
+        arguments: '--logger nunit'
+
+  - ${{ else }}:
+    - task: DotNetCoreCLI@2
+      displayName: 'Run MSTest tests'
+      inputs:
+        command: test
+        arguments: '--logger mstest'
+
+  # ── Edge case 2: parameter used only as a bare truthiness check ──────────────
+  # collectCoverage appears only as ${{ if parameters.collectCoverage }}:
+  - ${{ if parameters.collectCoverage }}:
+    - task: DotNetCoreCLI@2
+      displayName: 'Run tests with coverage'
+      inputs:
+        command: test
+        arguments: '--collect:"XPlat Code Coverage"'
+
+    # ── Edge case 5: nested 2-level conditional ──────────────────────────────
+    # failOnCoverageDecrease is only referenced inside an already-conditional block.
+    - ${{ if parameters.failOnCoverageDecrease }}:
+      - task: PowerShell@2
+        displayName: 'Assert coverage threshold (${{ parameters.coverageThreshold }}%)'
+        inputs:
+          targetType: inline
+          script: |
+            $threshold = ${{ parameters.coverageThreshold }}
+            Write-Host "Asserting coverage >= $threshold%"
+            # ... real assertion logic here ...
+
+  # ── Edge case 3: parameter used only in an else branch body ─────────────────
+  # publishResults is referenced in the body of the else branch, not in any condition.
+  - ${{ if eq(variables['Build.Reason'], 'PullRequest') }}:
+    - script: echo "PR build — skipping result publishing"
+      displayName: 'Skip publish (PR)'
+  - ${{ else }}:
+    - ${{ if parameters.publishResults }}:
+      - task: PublishTestResults@2
+        displayName: 'Publish test results'
+        inputs:
+          testResultsFormat: VSTest
+          testResultsFiles: '**/*.trx'
+          mergeTestResults: true
+
+  # ── Edge case 4: parameter used only in a script string inside a conditional ─
+  # testFilter and extraArgs are only referenced inside a conditional block's body,
+  # never as a condition themselves.
+  - ${{ if ne(parameters.testFilter, '') }}:
+    - script: |
+        dotnet test --filter "${{ parameters.testFilter }}" ${{ parameters.extraArgs }}
+      displayName: 'Run filtered tests (filter: ${{ parameters.testFilter }})'
