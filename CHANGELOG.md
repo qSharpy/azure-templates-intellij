@@ -2,6 +2,11 @@
 
 All notable changes to **Azure Templates Navigator** are documented here.
 
+## [1.8.4] — 2026-02-21
+
+### Fixed
+- **Crash on IntelliJ 2025.3+ resolved** — removed the "Open to side" link from the hover popup; it relied on the internal `EditorWindow.split()` API which was removed in build 253 and caused a `NoSuchMethodError` at runtime. The "⎆ Open" link remains fully functional.
+
 ## [1.8.3] — 2026-02-21
 
 ### Fixed

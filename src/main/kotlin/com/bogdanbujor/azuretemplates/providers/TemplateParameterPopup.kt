@@ -5,7 +5,6 @@ import com.bogdanbujor.azuretemplates.settings.PluginSettings
 import com.intellij.openapi.editor.Editor
 import com.intellij.openapi.fileEditor.FileEditorManager
 import com.intellij.openapi.fileEditor.OpenFileDescriptor
-import com.intellij.openapi.fileEditor.ex.FileEditorManagerEx
 import com.intellij.openapi.project.Project
 import com.intellij.openapi.ui.popup.JBPopupFactory
 import com.intellij.openapi.vfs.LocalFileSystem
@@ -267,22 +266,7 @@ object TemplateParameterPopup {
             FileEditorManager.getInstance(project).openFile(vf, true)
         }
 
-        val dotSeparator = JLabel("<html><span style='color:gray;'>&nbsp;·&nbsp;</span></html>")
-
-        val openToSideLink = makeLink("⊞ Open to side") {
-            val vf = LocalFileSystem.getInstance().findFileByPath(resolvedFilePath) ?: return@makeLink
-            val fem = FileEditorManagerEx.getInstanceEx(project)
-            fem.currentWindow?.split(
-                javax.swing.SwingConstants.VERTICAL,
-                true,
-                vf,
-                true
-            ) ?: fem.openFile(vf, true)
-        }
-
         panel.add(openLink)
-        panel.add(dotSeparator)
-        panel.add(openToSideLink)
         return panel
     }
 

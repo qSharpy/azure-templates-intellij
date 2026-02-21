@@ -26,6 +26,10 @@
     ]]></description>
 
     <change-notes><![CDATA[
+        <h3>1.8.4</h3>
+        <ul>
+            <li><b>Fix: crash on IntelliJ 2025.3+ resolved</b> — removed the "Open to side" link from the hover popup; it relied on the internal <code>EditorWindow.split()</code> API which was removed in build 253 and caused a <code>NoSuchMethodError</code> at runtime. The "⎆ Open" link remains fully functional.</li>
+        </ul>
         <h3>1.8.3</h3>
         <ul>
             <li><b>Compatibility extended to all future IntelliJ versions</b> — <code>untilBuild</code> is now explicitly set to <code>null</code> (no upper bound), making the plugin available in IntelliJ 2025.3 and all future versions</li>
