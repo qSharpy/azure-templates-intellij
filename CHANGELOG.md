@@ -2,6 +2,11 @@
 
 All notable changes to **Azure Templates Navigator** are documented here.
 
+## [1.8.3] — 2026-02-21
+
+### Fixed
+- **Compatibility range corrected** — 1.8.2 accidentally set the upper bound to `241.*` (same as `sinceBuild`) due to omitting `untilBuild` entirely. Now explicitly set to `null` (no upper bound), making the plugin available in IntelliJ 2025.3 and all future versions.
+
 ## [1.8.2] — 2026-02-21
 
 ### Changed

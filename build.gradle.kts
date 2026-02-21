@@ -5,7 +5,7 @@ plugins {
 }
 
 group = "com.bogdanbujor"
-version = "1.8.2"
+version = "1.8.3"
 
 repositories {
     mavenCentral()
@@ -32,6 +32,7 @@ intellijPlatform {
         name = "Azure Templates Navigator"
         ideaVersion {
             sinceBuild = "241"
+            untilBuild = provider { null }
         }
     }
 

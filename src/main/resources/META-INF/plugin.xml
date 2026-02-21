@@ -26,6 +26,10 @@
     ]]></description>
 
     <change-notes><![CDATA[
+        <h3>1.8.3</h3>
+        <ul>
+            <li><b>Compatibility extended to all future IntelliJ versions</b> — <code>untilBuild</code> is now explicitly set to <code>null</code> (no upper bound), making the plugin available in IntelliJ 2025.3 and all future versions</li>
+        </ul>
         <h3>1.8.2</h3>
         <ul>
             <li><b>Compatibility extended to all future IntelliJ versions</b> — removed the upper build-number cap (<code>untilBuild</code>) so the plugin is available in IntelliJ 2025.3 and beyond without requiring a re-release for each new IDE version</li>
