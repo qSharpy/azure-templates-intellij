@@ -2,6 +2,16 @@
 
 All notable changes to **Azure Templates Navigator** are documented here.
 
+## [1.6.0] — 2026-02-21
+
+### Added
+- **Errors Only filter in Dependency Tree** — new toolbar button hides all non-error nodes from the tree entirely; only files with ERROR-level diagnostics are shown, making it instant to spot every broken template at a glance.
+- **Deep error surfacing** — when Errors Only is active, errors nested deep in the dependency chain are promoted to the nearest visible ancestor so no error is ever hidden.
+
+### Changed
+- **Hide Warnings renamed** — the previous "Errors Only" toggle (which only suppressed amber colouring) is now correctly labelled "Hide Warnings" to distinguish it from the new structural filter.
+- **Empty group nodes suppressed** — "Called by" and "Is calling" section headers are omitted when all their children are filtered out, keeping the tree clean.
+
 ## [1.5.0] — 2026-02-21
 
 ### Added

@@ -26,6 +26,13 @@
     ]]></description>
 
     <change-notes><![CDATA[
+        <h3>1.6.0</h3>
+        <ul>
+            <li><b>Errors Only filter in Dependency Tree</b> — new toolbar button hides all non-error nodes from the tree entirely; only files with ERROR-level diagnostics are shown, making it instant to spot every broken template at a glance</li>
+            <li><b>Deep error surfacing</b> — when Errors Only is active, errors nested deep in the dependency chain are promoted to the nearest visible ancestor so no error is ever hidden</li>
+            <li><b>Hide Warnings renamed</b> — the previous "Errors Only" toggle (which only suppressed amber colouring) is now correctly labelled "Hide Warnings" to distinguish it from the new structural filter</li>
+            <li><b>Empty group nodes suppressed</b> — "Called by" and "Is calling" section headers are omitted when all their children are filtered out, keeping the tree clean</li>
+        </ul>
         <h3>1.5.0</h3>
         <ul>
             <li><b>Searchable parameter popup</b> — hovering over a template reference now opens a dedicated Swing popup (instead of a plain HTML tooltip) with a live search field; type to instantly filter parameters by name</li>

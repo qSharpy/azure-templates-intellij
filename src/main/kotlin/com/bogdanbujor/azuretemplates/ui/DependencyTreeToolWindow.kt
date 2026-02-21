@@ -72,6 +72,7 @@ class DependencyTreePanel(private val project: Project) {
     private var showFullPath = false
     private var treeExpanded = true
     private var hideWarnings = false
+    private var errorsOnly = false
     private var currentFilePath: String? = null
 
     /** Label shown in the header row with the currently active file name. */
@@ -111,7 +112,8 @@ class DependencyTreePanel(private val project: Project) {
         tree.isRootVisible = false
         tree.cellRenderer = TemplateTreeCellRenderer(
             showFullPathProvider = { showFullPath },
-            hideWarningsProvider = { hideWarnings }
+            hideWarningsProvider = { hideWarnings },
+            errorsOnlyProvider = { errorsOnly }
         )
 
         // Double-click to open file; right-click for context menu
@@ -209,12 +211,13 @@ class DependencyTreePanel(private val project: Project) {
         // Build the main panel — no separate toolbar row; all controls live in the header row.
         val mainPanel = JPanel(BorderLayout())
 
-        // Right-side action group: Show Full Path | Expand/Collapse | Hide Warnings | Open Diagnostics | Copy Path
+        // Right-side action group: Show Full Path | Expand/Collapse | Hide Warnings | Errors Only | Open Diagnostics | Copy Path
         val actionGroup = DefaultActionGroup().apply {
             add(ToggleFullPathAction())
             addSeparator()
             add(ExpandCollapseAction())
             add(HideWarningsAction())
+            add(ErrorsOnlyAction())
             addSeparator()
             add(OpenDiagnosticsAction())
             add(CopyPathAction())
@@ -428,15 +431,22 @@ class DependencyTreePanel(private val project: Project) {
             val allPaths = mutableListOf<List<String>>()
             collectUpstreamPaths(filePath, mutableListOf(), mutableSetOf(filePath), indexService, allPaths)
 
-            val callerCountText = if (callers.size == 1) "1 caller" else "${callers.size} callers"
             val callersNode = DefaultMutableTreeNode(
-                TreeNodeData("Called by", isGroup = true, description = callerCountText)
+                TreeNodeData("Called by", isGroup = true)
             )
 
             // Build a trie-like tree from the collected paths so shared prefixes are merged.
             buildUpstreamTree(callersNode, allPaths, basePath, indexService)
 
-            root.add(callersNode)
+            // Only add the group node if it has children (may be empty when errorsOnly filters everything out)
+            if (callersNode.childCount > 0) {
+                val visibleCount = callersNode.childCount
+                val callerCountText = if (visibleCount == 1) "1 caller" else "$visibleCount callers"
+                (callersNode.userObject as? TreeNodeData)?.let { data ->
+                    callersNode.userObject = data.copy(description = callerCountText)
+                }
+                root.add(callersNode)
+            }
         }
 
         // "Is calling" — downstream dependencies as a dedicated group node
@@ -445,13 +455,21 @@ class DependencyTreePanel(private val project: Project) {
         val refs = GraphBuilder.extractTemplateRefs(filePath)
 
         if (refs.isNotEmpty()) {
-            val refCountText = if (refs.size == 1) "1 template" else "${refs.size} templates"
             val callingNode = DefaultMutableTreeNode(
-                TreeNodeData("Is calling", isGroup = true, description = refCountText)
+                TreeNodeData("Is calling", isGroup = true)
             )
             val visited = mutableSetOf<String>()
             addDownstreamNodes(callingNode, refs, filePath, repoAliases, basePath, visited, indexService)
-            root.add(callingNode)
+
+            // Only add the group node if it has children (may be empty when errorsOnly filters everything out)
+            if (callingNode.childCount > 0) {
+                val visibleCount = callingNode.childCount
+                val refCountText = if (visibleCount == 1) "1 template" else "$visibleCount templates"
+                (callingNode.userObject as? TreeNodeData)?.let { data ->
+                    callingNode.userObject = data.copy(description = refCountText)
+                }
+                root.add(callingNode)
+            }
         }
 
         treeModel.reload()
@@ -506,6 +524,7 @@ class DependencyTreePanel(private val project: Project) {
      * Builds a trie-like tree under [parentNode] from [paths], where each path is an ordered
      * list of file paths from root pipeline down to the direct caller of the current template.
      * Shared path prefixes are merged into a single branch.
+     * When [errorsOnly] is active, only nodes with ERROR severity are included.
      */
     private fun buildUpstreamTree(
         parentNode: DefaultMutableTreeNode,
@@ -521,6 +540,11 @@ class DependencyTreePanel(private val project: Project) {
         }
 
         for ((nodePath, subPaths) in groups) {
+            val severity = indexService.getFileSeverity(nodePath)
+
+            // When errorsOnly is active, skip nodes that are not errors
+            if (errorsOnly && severity != IssueSeverity.ERROR) continue
+
             val relativePath = try {
                 File(nodePath).relativeTo(File(basePath)).path.replace("\\", "/")
             } catch (e: Exception) {
@@ -532,7 +556,7 @@ class DependencyTreePanel(private val project: Project) {
                     fullPathLabel = relativePath,
                     filePath = nodePath,
                     icon = AllIcons.FileTypes.Yaml,
-                    severity = indexService.getFileSeverity(nodePath)
+                    severity = severity
                 )
             )
             // Recurse for sub-paths that still have hops remaining
@@ -559,18 +583,22 @@ class DependencyTreePanel(private val project: Project) {
             val resolved = TemplateResolver.resolve(ref.templateRef, callerFile, repoAliases) ?: continue
 
             if (resolved.unknownAlias) {
-                parentNode.add(DefaultMutableTreeNode(
-                    TreeNodeData(
-                        label = "${ref.templateRef} (unknown alias @${resolved.alias})",
-                        icon = AllIcons.General.Warning
-                    )
-                ))
+                // Unknown alias nodes have no severity — skip when errorsOnly is active
+                if (!errorsOnly) {
+                    parentNode.add(DefaultMutableTreeNode(
+                        TreeNodeData(
+                            label = "${ref.templateRef} (unknown alias @${resolved.alias})",
+                            icon = AllIcons.General.Warning
+                        )
+                    ))
+                }
                 continue
             }
 
             val resolvedPath = resolved.filePath ?: continue
 
             if (!File(resolvedPath).exists()) {
+                // "Not found" nodes are always errors — always show them
                 parentNode.add(DefaultMutableTreeNode(
                     TreeNodeData(
                         label = "${ref.templateRef} (not found)",
@@ -582,19 +610,38 @@ class DependencyTreePanel(private val project: Project) {
 
             // Cycle detection
             if (resolvedPath in visited) {
-                val cycleRelPath = try {
-                    File(resolvedPath).relativeTo(File(basePath)).path.replace("\\", "/")
-                } catch (e: Exception) {
-                    File(resolvedPath).name
+                // Cycle nodes have no severity — skip when errorsOnly is active
+                if (!errorsOnly) {
+                    val cycleRelPath = try {
+                        File(resolvedPath).relativeTo(File(basePath)).path.replace("\\", "/")
+                    } catch (e: Exception) {
+                        File(resolvedPath).name
+                    }
+                    parentNode.add(DefaultMutableTreeNode(
+                        TreeNodeData(
+                            label = "${File(resolvedPath).name} (cycle)",
+                            fullPathLabel = "$cycleRelPath (cycle)",
+                            filePath = resolvedPath,
+                            icon = AllIcons.Actions.Undo
+                        )
+                    ))
                 }
-                parentNode.add(DefaultMutableTreeNode(
-                    TreeNodeData(
-                        label = "${File(resolvedPath).name} (cycle)",
-                        fullPathLabel = "$cycleRelPath (cycle)",
-                        filePath = resolvedPath,
-                        icon = AllIcons.Actions.Undo
-                    )
-                ))
+                continue
+            }
+
+            val severity = indexService?.getFileSeverity(resolvedPath)
+
+            // When errorsOnly is active, skip nodes that are not errors
+            if (errorsOnly && severity != IssueSeverity.ERROR) {
+                // Still recurse so we don't miss errors deeper in the tree
+                visited.add(resolvedPath)
+                val childText = try { File(resolvedPath).readText() } catch (e: Exception) { "" }
+                val childAliases = RepositoryAliasParser.parse(childText)
+                val childRefs = GraphBuilder.extractTemplateRefs(resolvedPath)
+                if (childRefs.isNotEmpty()) {
+                    addDownstreamNodes(parentNode, childRefs, resolvedPath, childAliases, basePath, visited, indexService)
+                }
+                visited.remove(resolvedPath)
                 continue
             }
 
@@ -621,7 +668,7 @@ class DependencyTreePanel(private val project: Project) {
                     fullPathLabel = fullPathLabel,
                     filePath = resolvedPath,
                     icon = icon,
-                    severity = indexService?.getFileSeverity(resolvedPath)
+                    severity = severity
                 )
             )
 
@@ -743,7 +790,7 @@ class DependencyTreePanel(private val project: Project) {
      * Only errors remain highlighted, making it easier to focus on critical issues.
      */
     private inner class HideWarningsAction : ToggleAction(
-        "Errors Only",
+        "Hide Warnings",
         "Hide warning highlights — only errors are shown in colour",
         AllIcons.General.Warning
     ) {
@@ -752,6 +799,27 @@ class DependencyTreePanel(private val project: Project) {
         override fun setSelected(e: AnActionEvent, state: Boolean) {
             hideWarnings = state
             tree.repaint()
+        }
+
+        override fun getActionUpdateThread(): ActionUpdateThread = ActionUpdateThread.EDT
+    }
+
+    /**
+     * When active, only nodes with ERROR severity are shown in the tree.
+     * All non-error nodes (warnings and clean files) are hidden entirely,
+     * making it easy to see at a glance which files have errors.
+     */
+    private inner class ErrorsOnlyAction : ToggleAction(
+        "Errors Only",
+        "Show only files with errors — hide all non-error nodes",
+        AllIcons.General.Error
+    ) {
+        override fun isSelected(e: AnActionEvent): Boolean = errorsOnly
+
+        override fun setSelected(e: AnActionEvent, state: Boolean) {
+            errorsOnly = state
+            // Rebuild the tree so nodes are added/removed based on the new filter
+            refresh()
         }
 
         override fun getActionUpdateThread(): ActionUpdateThread = ActionUpdateThread.EDT
@@ -839,7 +907,8 @@ class DependencyTreePanel(private val project: Project) {
  */
 class TemplateTreeCellRenderer(
     private val showFullPathProvider: () -> Boolean = { false },
-    private val hideWarningsProvider: () -> Boolean = { false }
+    private val hideWarningsProvider: () -> Boolean = { false },
+    private val errorsOnlyProvider: () -> Boolean = { false }
 ) : ColoredTreeCellRenderer() {
     override fun customizeCellRenderer(
         tree: JTree,

@@ -17,7 +17,7 @@ import com.intellij.openapi.components.Storage
 class PluginSettings : PersistentStateComponent<PluginSettings.State> {
 
     data class State(
-        var requiredParameterColor: String = "#c92d35",
+        var requiredParameterColor: String = "#E06C75",
         var diagnosticsEnabled: Boolean = true,
         var diagnosticsDebounceMs: Int = 500,
         var graphRootPath: String = ""

@@ -254,8 +254,8 @@ object TemplateParameterPopup {
                 "<b>${escapeHtml(value.name)}</b>"
             }
             val badge = if (value.required) " <i>(required)</i>" else ""
-            val defaultPart = if (value.default != null) " &mdash; default: <code>${escapeHtml(value.default)}</code>" else ""
-            val html = "<html><body style='font-family:${list.font.family};font-size:${list.font.size}pt;'>$nameHtml: <code>${escapeHtml(value.type)}</code>$defaultPart$badge</body></html>"
+            val defaultPart = if (value.default != null) " &mdash; default: <font color='#CE9178'>${escapeHtml(value.default)}</font>" else ""
+            val html = "<html><body style='font-family:${list.font.family};font-size:${list.font.size}pt;'>$nameHtml: <font color='#569CD6'>${escapeHtml(value.type)}</font>$defaultPart$badge</body></html>"
 
             return if (isSelected) {
                 selectedPane.font = list.font

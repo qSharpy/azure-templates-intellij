@@ -44,7 +44,7 @@ A dedicated tool window (**Azure Templates – Dependencies**) showing the full 
 - **Severity indicators** — tree nodes are coloured red/amber with ✖/⚠ suffixes based on their worst diagnostic severity
 - **File header badge** — shows an error/warning icon and coloured filename for the currently active file
 - **Fuzzy search bar** — type to find any indexed template; results appear in a popup navigable with Up/Down/Enter/Escape; typo-tolerant (e.g. `"templete"` finds `"template"`)
-- **Toolbar actions**: Show Full Path · Expand/Collapse All · Errors Only (hide warnings) · Open in Diagnostics · Copy Path
+- **Toolbar actions**: Show Full Path · Expand/Collapse All · Hide Warnings (suppress amber colouring) · Errors Only (hide all non-error nodes entirely) · Open in Diagnostics · Copy Path
 - **Right-click context menu**: Open in Diagnostics (when the node has issues)
 - Double-click any node to open the template file
 
