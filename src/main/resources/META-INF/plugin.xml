@@ -26,6 +26,11 @@
     ]]></description>
 
     <change-notes><![CDATA[
+        <h3>1.8.0</h3>
+        <ul>
+            <li><b>Fix: object-valued parameters no longer flagged as unknown</b> — when a parameter of type <code>object</code> is passed as a multi-line YAML mapping (e.g. <code>deployConfig:</code> with nested <code>replicas</code>, <code>strategy</code> keys), the nested property lines are no longer mistakenly collected as top-level parameters and reported as "unknown parameter"</li>
+            <li><b>Fix: <code>${{ each parameter in parameters }}:</code> pass-through no longer causes false "missing required parameter" errors</b> — the call-site validator now detects the each-passthrough idiom and skips all missing/unknown/type-mismatch checks for that call site, since every declared parameter is implicitly forwarded</li>
+        </ul>
         <h3>1.7.0</h3>
         <ul>
             <li><b>VS Code-inspired hover popup design</b> — redesigned parameter popup with higher contrast, theme-aware colours (blue for types, orange/rust for defaults, red for required), and improved spacing that adapts to both light and dark IDE themes</li>

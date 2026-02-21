@@ -1,0 +1,54 @@
+##
+## Template: each-passthrough.yml
+##
+## Demonstrates the "${{ each parameter in parameters }}:" pass-through idiom.
+##
+## This template is designed to be called from a wrapper pipeline that forwards
+## ALL of its own parameters into this template using the each-passthrough pattern:
+##
+##   - template: /samples/templates/each-passthrough.yml
+##     parameters:
+##       ${{ each parameter in parameters }}:
+##         ${{ parameter.key }}: ${{ parameter.value }}
+##
+## Before Bug 5 fix: the plugin reported every required parameter as "missing"
+## because PassedParameterParser returned an empty map (neither the
+## "${{ each ... }}:" line nor the "${{ parameter.key }}: ..." line matched
+## the PARAM_ENTRY regex).
+##
+## After fix: CallSiteValidator detects the each-passthrough pattern via
+## PassedParameterParser.hasEachPassthrough() and skips all checks.
+##
+
+parameters:
+  - name: appName
+    type: string
+  - name: environment
+    type: string
+    values: [dev, staging, prod]
+  - name: imageTag
+    type: string
+    default: latest
+  - name: replicas
+    type: number
+    default: 1
+  - name: enableDebug
+    type: boolean
+    default: false
+
+steps:
+  - script: |
+      echo "Deploying ${{ parameters.appName }}"
+      echo "Environment : ${{ parameters.environment }}"
+      echo "Image tag   : ${{ parameters.imageTag }}"
+      echo "Replicas    : ${{ parameters.replicas }}"
+      echo "Debug mode  : ${{ parameters.enableDebug }}"
+    displayName: 'Print deployment parameters'
+
+  - ${{ if eq(parameters.environment, 'prod') }}:
+    - script: echo "Running production pre-flight checks"
+      displayName: 'Production pre-flight'
+
+  - ${{ if parameters.enableDebug }}:
+    - script: echo "Debug logging enabled for ${{ parameters.appName }}"
+      displayName: 'Enable debug logging'

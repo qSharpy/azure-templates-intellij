@@ -96,6 +96,14 @@ object CallSiteValidator {
         // Parse parameters actually passed at this call site
         val passed = PassedParameterParser.parse(lines, templateLine)
 
+        // ── Each pass-through short-circuit ───────────────────────────────────
+        // If the call site uses `${{ each parameter in parameters }}:` to forward
+        // all parameters, every declared parameter is implicitly passed.
+        // Skip all three checks — nothing can be missing, unknown, or mismatched.
+        if (PassedParameterParser.hasEachPassthrough(lines, templateLine)) {
+            return diagnostics
+        }
+
         // ── Check 1: Missing required parameters ──────────────────────────────
         // Find the last line of the parameters block at this call site so the fix
         // knows where to append the new entry.

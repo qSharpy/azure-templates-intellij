@@ -2,6 +2,12 @@
 
 All notable changes to **Azure Templates Navigator** are documented here.
 
+## [1.8.0] — 2026-02-21
+
+### Fixed
+- **Object-valued parameters no longer flagged as unknown** — when a parameter of type `object` is passed as a multi-line YAML mapping (e.g. `deployConfig:` with nested `replicas`, `strategy` keys), the nested property lines are no longer mistakenly collected as top-level parameters and reported as "unknown parameter". `PassedParameterParser` now tracks `objectValueDepth` and skips all lines more deeply indented than the parameter entry until the indent returns to the parameter-entry level.
+- **`${{ each parameter in parameters }}:` pass-through no longer causes false "missing required parameter" errors** — the call-site validator now detects the each-passthrough idiom via `PassedParameterParser.hasEachPassthrough()` and skips all missing/unknown/type-mismatch checks for that call site, since every declared parameter is implicitly forwarded.
+
 ## [1.7.0] — 2026-02-21
 
 ### Changed

@@ -3,6 +3,7 @@ package com.bogdanbujor.azuretemplates.core
 import org.junit.Assert.*
 import org.junit.Test
 
+
 /**
  * Unit tests for [PassedParameterParser].
  *
@@ -308,5 +309,82 @@ class PassedParameterParserTest {
         assertNull(result["level1"])
         assertNull(result["level2"])
         assertNull(result["level3"])
+    }
+
+    // ── hasEachPassthrough (Bug 5) ────────────────────────────────────────────
+
+    private fun hasEachPassthrough(yaml: String): Boolean {
+        val lines = yaml.trimIndent().lines()
+        val templateLine = lines.indexOfFirst { it.trimStart().startsWith("- template:") }
+        require(templateLine >= 0) { "No '- template:' line found in test YAML" }
+        return PassedParameterParser.hasEachPassthrough(lines, templateLine)
+    }
+
+    @Test
+    fun `each passthrough - detected when present`() {
+        // Bug 5: ${{ each parameter in parameters }}: should be detected as pass-through
+        val yaml = """
+            - template: /templates/api.yml
+              parameters:
+                ${'$'}{{ each parameter in parameters }}:
+                  ${'$'}{{ parameter.key }}: ${'$'}{{ parameter.value }}
+        """
+        assertTrue(hasEachPassthrough(yaml))
+    }
+
+    @Test
+    fun `each passthrough - not detected for flat parameters block`() {
+        val yaml = """
+            - template: /templates/api.yml
+              parameters:
+                name: myapp
+                env: prod
+        """
+        assertFalse(hasEachPassthrough(yaml))
+    }
+
+    @Test
+    fun `each passthrough - not detected for if-conditional block`() {
+        val yaml = """
+            - template: /templates/api.yml
+              parameters:
+                ${'$'}{{ if eq(variables['env'], 'prod') }}:
+                  region: eastus
+        """
+        assertFalse(hasEachPassthrough(yaml))
+    }
+
+    @Test
+    fun `each passthrough - not detected when no parameters block`() {
+        val yaml = """
+            - template: /templates/api.yml
+        """
+        assertFalse(hasEachPassthrough(yaml))
+    }
+
+    @Test
+    fun `each passthrough - detected with different loop variable name`() {
+        // The loop variable name is arbitrary (p, param, item, etc.)
+        val yaml = """
+            - template: /templates/api.yml
+              parameters:
+                ${'$'}{{ each p in parameters }}:
+                  ${'$'}{{ p.key }}: ${'$'}{{ p.value }}
+        """
+        assertTrue(hasEachPassthrough(yaml))
+    }
+
+    @Test
+    fun `each passthrough - parse still returns empty map when each is present`() {
+        // parse() itself returns empty — the caller (CallSiteValidator) uses
+        // hasEachPassthrough() to decide whether to skip checks
+        val yaml = """
+            - template: /templates/api.yml
+              parameters:
+                ${'$'}{{ each parameter in parameters }}:
+                  ${'$'}{{ parameter.key }}: ${'$'}{{ parameter.value }}
+        """
+        val result = parse(yaml)
+        assertTrue(result.isEmpty())
     }
 }

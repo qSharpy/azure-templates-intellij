@@ -238,3 +238,23 @@ stages:
               tags:
                 team: platform
                 env: ${{ parameters.environment }}
+
+      # ══════════════════════════════════════════════════════════════════════════
+      # CALL-SITE EDGE CASE 5
+      # Each pass-through: all parameters forwarded via ${{ each }}
+      #
+      # Template: each-passthrough.yml
+      # Before Bug 5 fix: every required parameter was reported as "missing"
+      # because PassedParameterParser returned an empty map — neither the
+      # "${{ each parameter in parameters }}:" line nor the
+      # "${{ parameter.key }}: ${{ parameter.value }}" line matched PARAM_ENTRY.
+      # After fix: CallSiteValidator detects the each-passthrough pattern and
+      # skips all missing/unknown/type-mismatch checks for this call site.
+      # ══════════════════════════════════════════════════════════════════════════
+      - job: CallSite_EachPassthrough
+        displayName: 'Call-site: ${{ each parameter in parameters }}: pass-through'
+        steps:
+          - template: /samples/templates/each-passthrough.yml
+            parameters:
+              ${{ each parameter in parameters }}:
+                ${{ parameter.key }}: ${{ parameter.value }}

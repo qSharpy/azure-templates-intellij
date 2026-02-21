@@ -21,6 +21,12 @@ package com.bogdanbujor.azuretemplates.core
  * collected parameter entry and skips lines that are more deeply indented than it
  * (i.e. they are the object's body), resuming when the indent returns to the
  * parameter-entry level.
+ *
+ * ### Each pass-through
+ * The idiom `${{ each parameter in parameters }}:` / `${{ parameter.key }}: ${{ parameter.value }}`
+ * forwards ALL parameters from the outer pipeline into the template.  When this pattern
+ * is detected inside the `parameters:` block, [hasEachPassthrough] returns `true` and
+ * [CallSiteValidator] skips all missing/unknown/type-mismatch checks for that call site.
  */
 object PassedParameterParser {
 
@@ -35,6 +41,13 @@ object PassedParameterParser {
     private val CONDITIONAL_LINE = Regex("""^\s*\$\{\{\s*(?:if|elseif|else)[\s\S]*\}\}\s*:""")
 
     /**
+     * Matches the `${{ each <var> in parameters }}:` pass-through line.
+     * When present inside a `parameters:` block, ALL declared parameters are
+     * considered passed and no missing/unknown/type-mismatch checks should run.
+     */
+    private val EACH_PASSTHROUGH_LINE = Regex("""\$\{\{\s*each\s+\w+\s+in\s+parameters\s*\}\}\s*:""")
+
+    /**
      * Parses parameters passed at a template call site.
      *
      * Parameters may appear directly under `parameters:` or nested inside
@@ -46,6 +59,47 @@ object PassedParameterParser {
      * @param templateLine 0-based index of the "- template:" line
      * @return Map of parameter name to Pair(value, line number)
      */
+    /**
+     * Returns `true` if the `parameters:` block at [templateLine] contains a
+     * `${{ each <var> in parameters }}:` line — the "pass-through all parameters" idiom.
+     *
+     * When this returns `true`, [CallSiteValidator] must skip all missing/unknown/
+     * type-mismatch checks because every declared parameter is implicitly passed.
+     */
+    fun hasEachPassthrough(lines: List<String>, templateLine: Int): Boolean {
+        val templateRaw = lines[templateLine]
+        val templateIndent = templateRaw.length - templateRaw.trimStart().length
+
+        var inParamsBlock = false
+        var paramsIndent = -1
+
+        for (i in (templateLine + 1) until lines.size) {
+            val raw = lines[i]
+            val trimmed = raw.trimEnd()
+            val stripped = trimmed.trimStart()
+
+            if (stripped.isEmpty()) continue
+
+            val lineIndent = trimmed.length - stripped.length
+
+            if (lineIndent <= templateIndent) break
+
+            if (!inParamsBlock) {
+                if (PARAMETERS_KEY.containsMatchIn(trimmed)) {
+                    inParamsBlock = true
+                    paramsIndent = lineIndent
+                }
+                continue
+            }
+
+            if (lineIndent <= paramsIndent) break
+
+            if (EACH_PASSTHROUGH_LINE.containsMatchIn(trimmed)) return true
+        }
+
+        return false
+    }
+
     fun parse(lines: List<String>, templateLine: Int): Map<String, Pair<String, Int>> {
         val passed = mutableMapOf<String, Pair<String, Int>>()
 
