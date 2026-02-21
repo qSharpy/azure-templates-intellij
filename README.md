@@ -14,6 +14,8 @@ Hover over any `- template:` line to open a searchable popup showing all paramet
 - **Live search** — type in the search field to instantly filter parameters by name
 - **Keyboard navigation** — ↓/↑ arrow keys move through the list; Enter or double-click jumps to the parameter declaration in the template file
 - **Go-to-parameter** — navigate directly to where a parameter is declared in the template
+- **Open / Open to side** — clickable links in the popup header open the template file directly, or split the editor and open it to the right (VS Code-style)
+- **High-contrast design** — theme-aware colours for types (blue), default values (orange), and required parameters (red/coral); adapts to both light and dark IDE themes
 
 ### 🔴 Parameter Validation Diagnostics
 Real-time squiggly-line diagnostics on every template call site:

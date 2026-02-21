@@ -26,6 +26,13 @@
     ]]></description>
 
     <change-notes><![CDATA[
+        <h3>1.7.0</h3>
+        <ul>
+            <li><b>VS Code-inspired hover popup design</b> — redesigned parameter popup with higher contrast, theme-aware colours (blue for types, orange/rust for defaults, red for required), and improved spacing that adapts to both light and dark IDE themes</li>
+            <li><b>Open / Open to side links</b> — the hover popup header now shows clickable "⎆ Open" and "⊞ Open to side" links; "Open to side" splits the editor window vertically and opens the template file in the new right pane</li>
+            <li><b>Header separator</b> — a thin separator line visually divides the template path + action links from the parameters list</li>
+            <li><b>HiDPI-aware borders</b> — all padding now uses JBUI.Borders for correct scaling on high-DPI displays</li>
+        </ul>
         <h3>1.6.0</h3>
         <ul>
             <li><b>Errors Only filter in Dependency Tree</b> — new toolbar button hides all non-error nodes from the tree entirely; only files with ERROR-level diagnostics are shown, making it instant to spot every broken template at a glance</li>

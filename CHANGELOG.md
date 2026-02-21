@@ -2,6 +2,14 @@
 
 All notable changes to **Azure Templates Navigator** are documented here.
 
+## [1.7.0] — 2026-02-21
+
+### Changed
+- **VS Code-inspired hover popup design** — redesigned parameter popup with higher contrast, theme-aware `JBColor` pairs for type (blue), default value (rust/orange), and dash separator (muted grey); adapts correctly to both light and dark IDE themes.
+- **Open / Open to side links** — the hover popup header now shows clickable "⎆ Open" and "⊞ Open to side" action links; "Open to side" splits the editor window vertically and opens the template file in the new right pane (previously both actions were identical).
+- **Header separator** — a thin `JSeparator` visually divides the template path + action links from the parameters list.
+- **HiDPI-aware borders** — all padding now uses `JBUI.Borders` for correct scaling on high-DPI displays.
+
 ## [1.6.0] — 2026-02-21
 
 ### Added
