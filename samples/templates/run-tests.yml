@@ -1,5 +1,4 @@
 parameters:
-  # REQUIRED
   - name: testProject
     type: string
   - name: buildConfiguration
@@ -14,6 +13,79 @@ parameters:
   - name: testFilter
     type: string
     default: ''
+  - name: testProject
+    type: string
+  - name: buildConfiguration
+    type: string
+    default: 'Release'
+  - name: collectCoverage
+    type: boolean
+    default: true
+  - name: publishResults
+    type: boolean
+    default: true
+  - name: testFilter
+    type: string
+    default: ''
+  - name: testProject
+    type: string
+  - name: buildConfiguration
+    type: string
+    default: 'Release'
+  - name: collectCoverage
+    type: boolean
+    default: true
+  - name: publishResults
+    type: boolean
+    default: true
+  - name: testFilter
+    type: string
+    default: ''
+  - name: testProject
+    type: string
+  - name: buildConfiguration
+    type: string
+    default: 'Release'
+  - name: collectCoverage
+    type: boolean
+    default: true
+  - name: publishResults
+    type: boolean
+    default: true
+  - name: testFilter
+    type: string
+    default: ''
+  - name: testProject
+    type: string
+  - name: buildConfiguration
+    type: string
+    default: 'Release'
+  - name: collectCoverage
+    type: boolean
+    default: true
+  - name: publishResults
+    type: boolean
+    default: true
+  - name: testFilter
+    type: string
+    default: ''
+  - name: testProject
+    type: string
+  - name: buildConfiguration
+    type: string
+    default: 'Release'
+  - name: collectCoverage
+    type: boolean
+    default: true
+  - name: publishResults
+    type: boolean
+    default: true
+  - name: testFilter
+    type: string
+    default: ''
+
+
+
 
 steps:
   - task: DotNetCoreCLI@2

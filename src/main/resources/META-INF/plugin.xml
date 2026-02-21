@@ -26,6 +26,14 @@
     ]]></description>
 
     <change-notes><![CDATA[
+        <h3>1.5.0</h3>
+        <ul>
+            <li><b>Searchable parameter popup</b> — hovering over a template reference now opens a dedicated Swing popup (instead of a plain HTML tooltip) with a live search field; type to instantly filter parameters by name</li>
+            <li><b>Keyboard navigation in popup</b> — use ↓/↑ arrow keys from the search field to move through the parameter list; press Enter (or double-click) to jump directly to the parameter declaration in the template file</li>
+            <li><b>Go-to-parameter-declaration</b> — selecting a parameter in the hover popup and pressing Enter or double-clicking opens the template file at the exact line where that parameter is declared</li>
+            <li><b>Removed absolute file path from hover</b> — the tooltip previously showed both the relative template path and the absolute file path; now only the relative path is shown</li>
+            <li><b>Proper HTML styling in popup</b> — required parameters render in bold + configured colour, optional parameters in bold, types in code style, defaults and (required) badges all styled correctly</li>
+        </ul>
         <h3>1.4.0</h3>
         <ul>
             <li><b>Fuzzy search in Dependency Tree</b> — new search bar at the top of the Dependencies panel lets you find any indexed template by typing; results appear in a popup with filename (bold) and directory path (grey), navigable with Up/Down/Enter/Escape</li>
@@ -83,6 +91,10 @@
         <!-- Documentation (hover) -->
         <lang.documentationProvider language="yaml"
             implementationClass="com.bogdanbujor.azuretemplates.providers.TemplateDocumentationProvider"/>
+
+        <!-- Searchable parameter popup on hover (Swing-based, replaces JS search) -->
+        <editorFactoryListener
+            implementation="com.bogdanbujor.azuretemplates.providers.TemplateEditorFactoryListener"/>
 
         <!-- Go-to-declaration -->
         <gotoDeclarationHandler

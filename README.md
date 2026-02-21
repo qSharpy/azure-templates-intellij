@@ -9,7 +9,11 @@ Hover over any `- template:` reference to instantly see its parameters. Get real
 ## Features
 
 ### 🔍 Template Parameter Hover
-Hover over any `- template:` line to see a tooltip with all parameters declared in the referenced template — their types, default values, and which are required.
+Hover over any `- template:` line to open a searchable popup showing all parameters declared in the referenced template — their types, default values, and which are required.
+
+- **Live search** — type in the search field to instantly filter parameters by name
+- **Keyboard navigation** — ↓/↑ arrow keys move through the list; Enter or double-click jumps to the parameter declaration in the template file
+- **Go-to-parameter** — navigate directly to where a parameter is declared in the template
 
 ### 🔴 Parameter Validation Diagnostics
 Real-time squiggly-line diagnostics on every template call site:

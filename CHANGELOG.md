@@ -2,6 +2,17 @@
 
 All notable changes to **Azure Templates Navigator** are documented here.
 
+## [1.5.0] — 2026-02-21
+
+### Added
+- **Searchable parameter popup** — hovering over a template reference now opens a dedicated Swing popup with a live search field; type to instantly filter parameters by name (case-insensitive substring match).
+- **Keyboard navigation in popup** — ↓/↑ arrow keys from the search field move through the parameter list; Enter or double-click jumps to the parameter declaration in the template file.
+- **Go-to-parameter-declaration** — selecting a parameter in the hover popup and pressing Enter or double-clicking opens the template file at the exact line where that parameter is declared.
+
+### Changed
+- Hover tooltip no longer shows the absolute file path — only the relative template path is displayed.
+- HTML documentation popup for template references is suppressed in favour of the new Swing popup (variable hover and unknown-alias error tooltips are unaffected).
+
 ## [1.4.0] — 2026-02-20
 
 ### Added

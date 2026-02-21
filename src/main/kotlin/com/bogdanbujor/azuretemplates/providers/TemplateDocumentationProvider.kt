@@ -1,21 +1,17 @@
 package com.bogdanbujor.azuretemplates.providers
 
 import com.bogdanbujor.azuretemplates.core.*
-import com.bogdanbujor.azuretemplates.settings.PluginSettings
 import com.intellij.lang.documentation.AbstractDocumentationProvider
-import com.intellij.openapi.application.ReadAction
 import com.intellij.openapi.editor.Editor
-import com.intellij.openapi.vfs.LocalFileSystem
 import com.intellij.psi.PsiElement
 import com.intellij.psi.PsiFile
 
 /**
  * Documentation provider for YAML files that shows hover tooltips for:
- * 1. Template references - shows parameter info with types, defaults, required markers
- * 2. Variable references - shows variable value/source
- *
- * Port of hoverProvider.provideHover() + buildHoverMarkdown() + buildVariableHoverMarkdown()
- * from the VS Code extension.
+ * 1. Template references — delegated to TemplateParameterPopup (Swing, supports live search).
+ *    This provider returns null for template lines so the built-in HTML tooltip does not appear.
+ * 2. Variable references — shows variable value/source as HTML.
+ * 3. Unknown repository aliases — shows a helpful HTML message.
  */
 class TemplateDocumentationProvider : AbstractDocumentationProvider() {
 
@@ -34,7 +30,8 @@ class TemplateDocumentationProvider : AbstractDocumentationProvider() {
         val variableDoc = tryVariableHover(lineText, docText, offset - lineStart)
         if (variableDoc != null) return variableDoc
 
-        // Try template hover
+        // Try template hover — returns null for valid refs (Swing popup handles those),
+        // or an HTML string for unknown-alias errors.
         return tryTemplateHover(lineText, docText, filePath)
     }
 
@@ -44,7 +41,6 @@ class TemplateDocumentationProvider : AbstractDocumentationProvider() {
         contextElement: PsiElement?,
         targetOffset: Int
     ): PsiElement? {
-        // Return the context element to trigger generateDoc
         return contextElement
     }
 
@@ -75,74 +71,15 @@ class TemplateDocumentationProvider : AbstractDocumentationProvider() {
         val repoAliases = RepositoryAliasParser.parse(docText)
         val resolved = TemplateResolver.resolve(templateRef, currentFilePath, repoAliases) ?: return null
 
-        // Unknown alias
+        // Unknown alias — show a helpful HTML message (Swing popup doesn't handle this case)
         if (resolved.unknownAlias) {
             return buildUnknownAliasHtml(resolved.alias ?: "")
         }
 
-        val filePath = resolved.filePath ?: return null
-
-        // Read the template file via VFS inside a ReadAction to avoid blocking the EDT
-        val text = ReadAction.compute<String?, Throwable> {
-            val vf = LocalFileSystem.getInstance().findFileByPath(filePath)
-                ?: return@compute null
-            try {
-                String(vf.contentsToByteArray(), vf.charset)
-            } catch (e: Exception) {
-                null
-            }
-        } ?: return buildFileNotFoundHtml(filePath, resolved.repoName)
-
-        val settings = PluginSettings.getInstance()
-        val requiredColor = settings.requiredParameterColor
-        val params = ParameterParser.parse(text)
-
-        return buildTemplateHoverHtml(templateRef, params, requiredColor, resolved.repoName, filePath)
-    }
-
-    private fun buildTemplateHoverHtml(
-        templateRef: String,
-        params: List<TemplateParameter>,
-        requiredColor: String,
-        repoName: String?,
-        filePath: String
-    ): String {
-        val sb = StringBuilder()
-        sb.append("<html><head><style>")
-        sb.append("body { min-width: 500px; }")
-        sb.append("li { white-space: nowrap; }")
-        sb.append("</style></head><body>")
-
-        // Header
-        sb.append("<b>Template:</b> <code>${templateRef.trim()}</code><br/><br/>")
-
-        if (repoName != null) {
-            sb.append("<b>External repository:</b> <code>$repoName</code><br/><br/>")
-        }
-
-        // File path
-        sb.append("<b>File:</b> <code>$filePath</code><br/><br/>")
-
-        if (params.isEmpty()) {
-            sb.append("<i>No parameters defined</i>")
-        } else {
-            sb.append("<b>Parameters:</b><br/>")
-            sb.append("<ul>")
-            for (p in params) {
-                val nameHtml = if (p.required) {
-                    "<span style=\"color:$requiredColor;\"><b>${p.name}</b></span>"
-                } else {
-                    "<b>${p.name}</b>"
-                }
-                val badge = if (p.required) " <i>(required)</i>" else ""
-                val defaultPart = if (p.default != null) " &mdash; default: <code>${p.default}</code>" else ""
-                sb.append("<li>$nameHtml: <code>${p.type}</code>$defaultPart$badge</li>")
-            }
-            sb.append("</ul>")
-        }
-
-        sb.append("</body></html>")
-        return sb.toString()
+        // Valid template reference: the Swing popup (TemplateParameterPopup via
+        // TemplateHoverMouseListener) handles display with live search.
+        // Return null so IntelliJ's built-in HTML tooltip does NOT appear alongside it.
+        return null
     }
 
     private fun buildVariableHoverHtml(
@@ -189,16 +126,5 @@ class TemplateDocumentationProvider : AbstractDocumentationProvider() {
             to enable cross-repo template resolution.</i>
             </body></html>
         """.trimIndent()
-    }
-
-    private fun buildFileNotFoundHtml(filePath: String, repoName: String?): String {
-        val sb = StringBuilder()
-        sb.append("<html><head><style>body { min-width: 500px; }</style></head><body>")
-        sb.append("<b>Template not found:</b><br/><br/><code>$filePath</code>")
-        if (repoName != null) {
-            sb.append("<br/><br/><i>Make sure the <code>$repoName</code> repository is cloned next to this workspace.</i>")
-        }
-        sb.append("</body></html>")
-        return sb.toString()
     }
 }
